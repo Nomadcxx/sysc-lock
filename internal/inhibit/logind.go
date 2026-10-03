@@ -15,12 +15,12 @@ type Logind struct {
 	fd   int
 }
 
-// NewLogind connects to the session bus (dial failure ⇒ caller exits 4:
+// NewLogind connects to the system bus (logind lives there) (dial failure ⇒ caller exits 4:
 // refusing to lock without a sleep guard).
 func NewLogind() (*Logind, error) {
-	conn, err := dbus.SessionBusPrivate()
+	conn, err := dbus.SystemBusPrivate()
 	if err != nil {
-		return nil, fmt.Errorf("session bus: %w", err)
+		return nil, fmt.Errorf("system bus: %w", err)
 	}
 	// godbus private connections are unauthenticated until Auth runs; calling
 	// Hello first hangs forever waiting for a reply the bus won't accept.
