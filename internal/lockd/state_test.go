@@ -206,3 +206,67 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestFinishedFromLockedTerminates(t *testing.T) {
+	s := New()
+	if err := s.LockRequested(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Locked(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Finished(); err != nil {
+		t.Fatalf("compositor-initiated finish while Locked: %v", err)
+	}
+	if got := s.Phase(); got != Terminated {
+		t.Fatalf("phase=%v want Terminated", got)
+	}
+	if err := s.Unlock(); !errors.Is(err, ErrInvalidUnlock) {
+		t.Fatalf("Unlock after Terminated: %v", err)
+	}
+	if s.HandshakeReady() {
+		t.Fatal("handshake ready after Terminated")
+	}
+	if err := s.Finished(); err != nil {
+		t.Fatalf("finished is at-most-once; repeat must be idempotent: %v", err)
+	}
+}
+
+func TestFinishedFromUnlockingAndIdle(t *testing.T) {
+	s := New()
+	if err := s.Finished(); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("finished from Idle: %v", err)
+	}
+	s2 := New()
+	if err := s2.LockRequested(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s2.Locked(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s2.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s2.Finished(); err != nil {
+		t.Fatalf("finished from Unlocking: %v", err)
+	}
+	if s2.Phase() != Terminated {
+		t.Fatalf("phase=%v want Terminated", s2.Phase())
+	}
+}
+
+func TestAckNeedsConfigure(t *testing.T) {
+	s := New()
+	if err := s.AddOutput(1, 1920, 1080); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Ack(1); !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("Ack before configure: got %v want ErrNotConfigured", err)
+	}
+	if err := s.Configure(1, 4, 1920, 1080); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Ack(1); err != nil || got != 4 {
+		t.Fatalf("Ack after configure: got (%v,%v)", got, err)
+	}
+}

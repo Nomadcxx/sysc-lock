@@ -18,6 +18,9 @@ const (
 	Unlocking
 	Done
 	Refused
+	// Terminated is the compositor-initiated end of the lock after it was
+	// granted (finished received while Locked/Unlocking). Terminal.
+	Terminated
 )
 
 var (
@@ -27,12 +30,14 @@ var (
 	ErrWrongSize         = errors.New("lockd: committed size differs from configure")
 	ErrNotAcked          = errors.New("lockd: commit before ack-configure")
 	ErrUnknownOutput     = errors.New("lockd: unknown output")
+	ErrNotConfigured     = errors.New("lockd: ack before configure")
 )
 
 type Output struct {
 	Width, Height uint32
 	PendingSerial uint32
 	AckedSerial   uint32
+	Configured    bool
 	Acked         bool
 	Ready         bool
 }
@@ -80,7 +85,7 @@ func (s *State) Configure(id OutputID, serial, w, h uint32) error {
 		return ErrUnknownOutput
 	}
 	o.PendingSerial, o.Width, o.Height = serial, w, h
-	o.Acked, o.Ready = false, false
+	o.Configured, o.Acked, o.Ready = true, false, false
 	return nil
 }
 
@@ -90,6 +95,9 @@ func (s *State) Ack(id OutputID) (uint32, error) {
 	o, ok := s.outputs[id]
 	if !ok {
 		return 0, ErrUnknownOutput
+	}
+	if !o.Configured {
+		return 0, ErrNotConfigured
 	}
 	o.AckedSerial, o.Acked = o.PendingSerial, true
 	return o.AckedSerial, nil
@@ -135,10 +143,18 @@ func (s *State) Locked() error {
 func (s *State) Finished() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.phase == Refused {
+	switch s.phase {
+	case Refused, Terminated:
 		return nil // finished is sent at most once; idempotent terminal
+	case Requesting:
+		s.phase = Refused // lock refused: locked was never sent
+		return nil
+	case Locked, Unlocking:
+		s.phase = Terminated // compositor ended the granted lock
+		return nil
+	default:
+		return ErrInvalidTransition
 	}
-	return s.transition(Requesting, Refused)
 }
 
 func (s *State) Unlock() error {
