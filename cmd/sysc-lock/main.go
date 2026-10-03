@@ -60,6 +60,7 @@ func main() {
 	view.Entry = model
 
 	authenticator := newAuthenticator()
+	gate := &enterGate{}
 
 	st := lockd.New()
 	var client *lockd.Client
@@ -67,10 +68,10 @@ func main() {
 		// Runs on the pump goroutine — sole mutator of model/view.
 		if k.Enter {
 			pass := model.Password()
-			if pass == "" {
+			if !gate.try(pass) {
 				return
 			}
-			go authenticate(authenticator, pass, client, view, model)
+			go authenticate(authenticator, pass, client, view, model, gate)
 		} else if k.Backspace {
 			model.Backspace()
 		} else if k.Escape {
@@ -119,7 +120,8 @@ func main() {
 	}
 }
 
-func authenticate(a authenticator, pass string, client *lockd.Client, view *lockd.View, model *input.Model) {
+func authenticate(a authenticator, pass string, client *lockd.Client, view *lockd.View, model *input.Model, gate *enterGate) {
+	defer client.Post(func() { gate.release() })
 	res, err := a.Verify(a.User(), func(prompt string, echo bool) (string, error) {
 		if echo { // PAM asked for something besides the password: refuse
 			return "", fmt.Errorf("unexpected echo prompt: %s", prompt)

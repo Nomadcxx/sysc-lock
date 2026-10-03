@@ -172,3 +172,16 @@ func (s *State) Done() error {
 	defer s.mu.Unlock()
 	return s.transition(Unlocking, Done)
 }
+
+// FinishedDestructor is the protocol request to send after Finished():
+// destroy if locked was never sent, unlock_and_destroy if it was.
+func (s *State) FinishedDestructor() string {
+	switch s.Phase() {
+	case Refused:
+		return "destroy"
+	case Terminated:
+		return "unlock_and_destroy"
+	default:
+		return ""
+	}
+}

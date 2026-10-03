@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -50,13 +52,32 @@ func watchSignals(sigs chan os.Signal, c *lockd.Client, release func()) {
 	}
 }
 
+const lockedHandshakeLine = "sysc-lock: locked"
+
+func emitLockedHandshake(w io.Writer) {
+	fmt.Fprintln(w, lockedHandshakeLine)
+}
+
+// enterGate serializes PAM: the pump goroutine is the only mutator.
+type enterGate struct{ busy bool }
+
+func (g *enterGate) try(pass string) bool {
+	if g.busy || pass == "" {
+		return false
+	}
+	g.busy = true
+	return true
+}
+
+func (g *enterGate) release() { g.busy = false }
+
 // watchLocked prints the handshake line the shell waits for, then drops the
 // sleep inhibitor: locked frames are presented on every output, so suspend
 // (if it comes) happens behind the lock.
 func watchLocked(c *lockd.Client, release func()) {
 	for {
 		if c.HandshakeReady() {
-			println("sysc-lock: locked")
+			emitLockedHandshake(os.Stdout)
 			os.Stdout.Sync()
 			release()
 			return

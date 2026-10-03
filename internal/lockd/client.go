@@ -202,6 +202,15 @@ func (c *Client) Lock() error {
 		// finished before locked is a refusal; after locked it is a
 		// compositor-initiated end. Finished() itself is terminal-safe.
 		c.state.Finished()
+		switch c.state.FinishedDestructor() {
+		case "destroy":
+			_ = c.lock.Destroy()
+		case "unlock_and_destroy":
+			_ = c.lock.UnlockAndDestroy()
+		}
+		for _, out := range c.outputs {
+			c.destroyOut(out)
+		}
 	})
 	for id, out := range c.outputs {
 		if out.lockSurf == nil {
@@ -371,6 +380,11 @@ func (c *Client) UnlockAndQuit() {
 		return
 	}
 	c.lock.UnlockAndDestroy()
+	// XML: a client exiting after unlock must wl_display.sync so the
+	// compositor processes unlock_and_destroy before the socket closes.
+	if err := c.display.Roundtrip(); err != nil {
+		fmt.Fprintf(os.Stderr, "sysc-lock: unlock sync: %v\n", err)
+	}
 	for _, out := range c.outputs {
 		c.destroyOut(out)
 	}

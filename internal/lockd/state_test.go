@@ -207,6 +207,37 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+func TestFinishedDestructor(t *testing.T) {
+	refused := New()
+	if err := refused.LockRequested(); err != nil {
+		t.Fatal(err)
+	}
+	if err := refused.Finished(); err != nil {
+		t.Fatal(err)
+	}
+	if got := refused.FinishedDestructor(); got != "destroy" {
+		t.Fatalf("refused destructor = %q, want destroy (locked was never sent)", got)
+	}
+
+	ended := New()
+	if err := ended.LockRequested(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ended.Locked(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ended.Finished(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ended.FinishedDestructor(); got != "unlock_and_destroy" {
+		t.Fatalf("terminated destructor = %q, want unlock_and_destroy", got)
+	}
+
+	if New().FinishedDestructor() != "" {
+		t.Fatal("idle has no destructor")
+	}
+}
+
 func TestFinishedFromLockedTerminates(t *testing.T) {
 	s := New()
 	if err := s.LockRequested(); err != nil {
