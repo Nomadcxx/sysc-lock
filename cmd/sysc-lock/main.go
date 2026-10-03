@@ -1,6 +1,8 @@
 // Command sysc-lock locks the Wayland session via ext-session-lock-v1 and
-// unlocks it with in-process PAM (service "login"). There is no bypass of any
-// kind: no flag, env or build tag disables authentication.
+// unlocks it with in-process PAM (service "login"). The default build has no
+// bypass of any kind: no flag or env disables authentication or the inhibitor
+// requirement (the lockdev build tag is a dev-harness-only exception, removed
+// in Task 14).
 package main
 
 import (
@@ -11,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
-	"github.com/Nomadcxx/sysc-lock/internal/inhibit"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
@@ -38,17 +39,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logind, err := inhibit.NewLogind()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "sysc-lock: no sleep inhibitor:", err)
-		os.Exit(4)
-	}
-	release, err := inhibit.Take(logind)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "sysc-lock: no sleep inhibitor:", err)
-		logind.Release()
-		os.Exit(4)
-	}
+	release := takeInhibit()
 
 	// SIGTERM before the compositor confirms "locked": abandon the lock
 	// request (spec-legal: the session was never sealed) and exit 3. After
