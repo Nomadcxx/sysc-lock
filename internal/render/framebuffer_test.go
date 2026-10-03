@@ -17,7 +17,7 @@ func TestExactSizeAndFill(t *testing.T) {
 		t.Fatalf("size: %dx%d pix=%d", fb.Width, fb.Height, len(fb.Pix))
 	}
 	fb.Fill(color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xFF})
-	for _, off := range []int{0, (1*3+2)*4} {
+	for _, off := range []int{0, (1*3 + 2) * 4} {
 		if got := fb.Pix[off : off+4]; got[0] != 0x11 || got[3] != 0xFF {
 			t.Fatalf("pixel at %d = %v", off, got)
 		}
@@ -92,4 +92,3 @@ func TestBackgroundCoverCenterCrop(t *testing.T) {
 		t.Fatalf("jpeg decode failed, pix[0]=%d", fb2.Pix[0])
 	}
 }
-
