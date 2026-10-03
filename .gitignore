@@ -19,3 +19,6 @@ CLAUDE_LOCAL.md
 
 # Go build cache
 go.sum.backup
+/sysc-lock
+/sysc-lock-*
+*.test

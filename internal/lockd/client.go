@@ -489,3 +489,15 @@ func (c *Client) HandshakeReady() bool {
 	}
 	return true
 }
+
+// Repaint schedules a fresh frame commit for every output that already has
+// one, on the pump goroutine. Keystrokes and clock ticks route through this.
+func (c *Client) Repaint() {
+	c.Post(func() {
+		for _, out := range c.outputs {
+			if out.committed && out.w > 0 && out.h > 0 {
+				_ = c.commitFrame(out, out.w, out.h)
+			}
+		}
+	})
+}
