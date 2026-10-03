@@ -131,10 +131,13 @@ func Connect(state *State, onKey KeyFunc, frame FrameFunc) (*Client, error) {
 
 func (c *Client) global(g client.RegistryGlobalEvent) {
 	ctx := c.display.Context()
-	bind := func(id client.Proxy) error {
+	// ponytail: cap per-interface versions at what we actually use; raise
+	// when a feature needs more (wl_compositor surfaces need >=3 for
+	// set_buffer_scale, outputs >=4 for the name event).
+	bind := func(id client.Proxy, want uint32) error {
 		v := g.Version
-		if v > 1 {
-			v = 1
+		if v > want {
+			v = want
 		}
 		return c.registry.Bind(g.Name, g.Interface, v, id)
 	}
@@ -142,14 +145,14 @@ func (c *Client) global(g client.RegistryGlobalEvent) {
 	case "wl_compositor":
 		if c.compositor == nil {
 			o := client.NewCompositor(ctx)
-			if bind(o) == nil {
+			if bind(o, 6) == nil {
 				c.compositor = o
 			}
 		}
 	case "wl_shm":
 		if c.shm == nil {
 			o := client.NewShm(ctx)
-			if bind(o) == nil {
+			if bind(o, 1) == nil {
 				o.SetFormatHandler(func(ev client.ShmFormatEvent) {
 					if ev.Format == 0 { // ARGB8888
 						c.shmFmt, c.haveFmt = ev.Format, true
@@ -161,14 +164,14 @@ func (c *Client) global(g client.RegistryGlobalEvent) {
 	case "wl_seat":
 		if c.seat == nil {
 			o := client.NewSeat(ctx)
-			if bind(o) == nil {
+			if bind(o, 5) == nil {
 				c.seat = o
 				c.setupKeyboard()
 			}
 		}
 	case "wl_output":
 		o := client.NewOutput(ctx)
-		if bind(o) == nil {
+		if bind(o, 4) == nil {
 			c.addOutput(OutputID(g.Name), o)
 		}
 	case sessionlock.ExtSessionLockManagerV1InterfaceName:
