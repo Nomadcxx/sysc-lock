@@ -1,7 +1,4 @@
 # Build artifacts
-sysc-lock
-sysc-lock-tui
-sysc-lock-monitor
 *.o
 *.a
 *.so
