@@ -1,5 +1,7 @@
 github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1 h1:b/fota81Abko+zPV8AhLKp4kvLtJhz9R/sCNntG6iZ8=
 github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1/go.mod h1:ZNAe41EM7R5G2KA55jqMPotAvrjVWcMq21BV69gROKA=
+github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
+github.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
 github.com/msteinert/pam/v2 v2.1.0 h1:er5F9TKV5nGFuTt12ubtqPHEUdeBwReP7vd3wovidGY=
 github.com/msteinert/pam/v2 v2.1.0/go.mod h1:KT28NNIcDFf3PcBmNI2mIGO4zZJ+9RSs/At2PB3IDVc=
 github.com/thegrumpylion/xkb-go v0.1.0 h1:/LfJ0zQ/gUCH3c6CLMRzuLX9tfn665arh8TT7pXA6lU=
