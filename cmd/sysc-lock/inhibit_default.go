@@ -1,4 +1,3 @@
-//go:build !lockdev
 
 package main
 

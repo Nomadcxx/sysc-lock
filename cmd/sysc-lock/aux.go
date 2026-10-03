@@ -11,8 +11,6 @@ import (
 )
 
 // authenticator is the seam; only the real PAM implementation exists here —
-// Default build links only real PAM (auth_default.go); the lockdev build
-// tag swaps in a development authenticator (auth_lockdev.go, deleted by Task 14).
 type authenticator interface {
 	Verify(user string, response auth.PromptFunc) (auth.Result, error)
 	User() string

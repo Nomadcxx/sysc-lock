@@ -1,7 +1,6 @@
 // Command sysc-lock locks the Wayland session via ext-session-lock-v1 and
 // unlocks it with in-process PAM (service "login"). The default build has no
 // bypass of any kind: no flag or env disables authentication or the inhibitor
-// requirement (the lockdev build tag is a dev-harness-only exception, removed
 // in Task 14).
 package main
 
