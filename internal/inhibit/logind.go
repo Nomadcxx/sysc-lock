@@ -22,6 +22,12 @@ func NewLogind() (*Logind, error) {
 	if err != nil {
 		return nil, fmt.Errorf("session bus: %w", err)
 	}
+	// godbus private connections are unauthenticated until Auth runs; calling
+	// Hello first hangs forever waiting for a reply the bus won't accept.
+	if err := conn.Auth(nil); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("auth: %w", err)
+	}
 	if err := conn.Hello(); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("hello: %w", err)
