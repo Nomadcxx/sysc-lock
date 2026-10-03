@@ -1,0 +1,21 @@
+# Build artifacts
+sysc-lock
+sysc-lock-tui
+sysc-lock-monitor
+*.o
+*.a
+*.so
+
+# Generated protocol files
+*.c
+*.h
+
+# IDE files
+.vscode/
+.idea/
+
+# Local configuration (DO NOT COMMIT)
+CLAUDE_LOCAL.md
+
+# Go build cache
+go.sum.backup
