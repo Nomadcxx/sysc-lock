@@ -89,7 +89,12 @@ func Connect(state *State, onKey KeyFunc, frame FrameFunc) (*Client, error) {
 		outputs: make(map[OutputID]*lockOut),
 	}
 	ctx := display.Context()
-	c.registry = client.NewRegistry(ctx)
+	reg, err := display.GetRegistry()
+	if err != nil {
+		ctx.Close()
+		return nil, fmt.Errorf("get_registry: %w", err)
+	}
+	c.registry = reg
 	c.registry.SetGlobalHandler(func(g client.RegistryGlobalEvent) { c.global(g) })
 	if err := display.Roundtrip(); err != nil {
 		ctx.Close()
