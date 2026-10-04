@@ -43,9 +43,10 @@ type Output struct {
 }
 
 type State struct {
-	mu      sync.Mutex
-	phase   Phase
-	outputs map[OutputID]*Output
+	mu       sync.Mutex
+	phase    Phase
+	outputs  map[OutputID]*Output
+	sequence uint64
 }
 
 func New() *State {
@@ -73,6 +74,7 @@ func (s *State) AddOutput(id OutputID, w, h uint32) error {
 	if _, dup := s.outputs[id]; dup {
 		return ErrDuplicateOutput
 	}
+	s.sequence++
 	s.outputs[id] = &Output{Width: w, Height: h}
 	return nil
 }
@@ -86,6 +88,7 @@ func (s *State) Configure(id OutputID, serial, w, h uint32) error {
 	}
 	o.PendingSerial, o.Width, o.Height = serial, w, h
 	o.Configured, o.Acked, o.Ready = true, false, false
+	s.sequence++
 	return nil
 }
 
@@ -117,6 +120,7 @@ func (s *State) Commit(id OutputID, w, h uint32) error {
 		return ErrWrongSize
 	}
 	o.Ready = true
+	s.sequence++
 	return nil
 }
 
@@ -125,6 +129,7 @@ func (s *State) transition(from, to Phase) error {
 		return ErrInvalidTransition
 	}
 	s.phase = to
+	s.sequence++
 	return nil
 }
 
@@ -147,9 +152,11 @@ func (s *State) Finished() error {
 	case Refused, Terminated:
 		return nil // finished is sent at most once; idempotent terminal
 	case Requesting:
+		s.sequence++
 		s.phase = Refused // lock refused: locked was never sent
 		return nil
 	case Locked, Unlocking:
+		s.sequence++
 		s.phase = Terminated // compositor ended the granted lock
 		return nil
 	default:
@@ -164,6 +171,7 @@ func (s *State) Unlock() error {
 		return ErrInvalidUnlock
 	}
 	s.phase = Unlocking
+	s.sequence++
 	return nil
 }
 
@@ -184,4 +192,43 @@ func (s *State) FinishedDestructor() string {
 	default:
 		return ""
 	}
+}
+
+// Snapshot contains no owner-mutated maps or protocol objects.
+type Snapshot struct {
+	Sequence uint64
+	Phase    Phase
+	UIReady  bool
+	UIError  string
+}
+
+func (s *State) Snapshot() Snapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v := Snapshot{Sequence: s.sequence, Phase: s.phase, UIReady: len(s.outputs) > 0}
+	for _, o := range s.outputs {
+		v.UIReady = v.UIReady && o.Ready
+	}
+	return v
+}
+
+func (s *State) RemoveOutput(id OutputID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.outputs, id)
+	s.sequence++
+}
+
+// CompleteUnlock confirms transport completion before publishing Done.
+func (s *State) CompleteUnlock(request, sync func() error) error {
+	if err := s.Unlock(); err != nil {
+		return err
+	}
+	if err := request(); err != nil {
+		return err
+	}
+	if err := sync(); err != nil {
+		return err
+	}
+	return s.Done()
 }

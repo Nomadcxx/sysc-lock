@@ -5,6 +5,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -47,7 +48,12 @@ func main() {
 	sigs := make(chan os.Signal, 2)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 
-	user := currentUser()
+	user, err := currentUser()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
+		release()
+		os.Exit(1)
+	}
 	host, _ := os.Hostname()
 	pal, err := theme.Load(palettePath())
 	if err != nil {
@@ -57,29 +63,29 @@ func main() {
 	view.Background = os.Getenv("SYSC_LOCK_WALLPAPER")
 	view.Layout = os.Getenv("SYSC_LOCK_LAYOUT")
 	model := &input.Model{}
+	defer model.Clear()
 	view.Entry = model
 
-	authenticator := newAuthenticator()
+	authenticator := newAuthenticator(user)
 	gate := &enterGate{}
 
 	st := lockd.New()
 	var client *lockd.Client
 	client, err = lockd.Connect(st, func(k lockd.Key) {
 		// Runs on the pump goroutine — sole mutator of model/view.
-		if k.Enter {
-			pass := model.Password()
-			if !gate.try(pass) {
-				return
-			}
-			go authenticate(authenticator, pass, client, view, model, gate)
-		} else if k.Backspace {
-			model.Backspace()
-		} else if k.Escape {
-			model.Clear()
-		} else if k.Text != "" {
-			model.Append(k.Text)
-		}
 		view.Caps = k.CapsLock
+		if view.Terminal() {
+			client.Repaint()
+			return
+		}
+		submit, editErr := gate.handle(model, k)
+		if editErr != nil {
+			view.SetError(editErr.Error(), time.Now())
+		}
+		if submit {
+			view.Busy = true
+			go authenticate(authenticator, model.Password(), client, view, model, gate, gate.generation)
+		}
 		client.Repaint()
 	}, func(w, h int) ([]byte, error) {
 		fb := render.New(w, h)
@@ -92,7 +98,7 @@ func main() {
 		os.Exit(1)
 	}
 	go watchSignals(sigs, client, release)
-	go watchLocked(client, release)
+	watchLocked(client, release)
 
 	if err := client.Lock(); err != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
@@ -100,6 +106,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err := client.Run(); err != nil {
+		if errors.Is(err, lockd.ErrAborted) {
+			release()
+			os.Exit(3)
+		}
 		fmt.Fprintln(os.Stderr, "sysc-lock: connection lost:", err)
 		release()
 		os.Exit(1)
@@ -120,22 +130,24 @@ func main() {
 	}
 }
 
-func authenticate(a authenticator, pass string, client *lockd.Client, view *lockd.View, model *input.Model, gate *enterGate) {
-	defer client.Post(func() { gate.release() })
-	res, err := a.Verify(a.User(), func(prompt string, echo bool) (string, error) {
-		if echo { // PAM asked for something besides the password: refuse
-			return "", fmt.Errorf("unexpected echo prompt: %s", prompt)
-		}
-		return pass, nil
-	})
+func authenticate(a authenticator, pass string, client *lockd.Client, view *lockd.View, model *input.Model, gate *enterGate, generation uint64) {
+	res, err := a.Verify(a.User(), auth.PasswordPrompt(pass))
+	pass = "" // immutable runtime/PAM copies cannot be reliably erased
 	client.Post(func() {
-		model.Clear() // zero the entry regardless of outcome
+		if !gate.accept(generation, client.State().Phase()) {
+			return
+		}
+		gate.release()
+		view.Busy = false
+		model.Clear()
 		switch {
 		case err != nil:
-			view.SetError(err.Error(), time.Now())
+			view.SetError("Authentication unavailable", time.Now())
 		case res.OK:
 			view.SetError("", time.Now())
-			client.UnlockAndQuit()
+			if err := client.UnlockAndQuit(); err != nil {
+				view.SetErrorTerminal("Unlock confirmation failed", time.Now())
+			}
 		case res.Terminal:
 			view.SetErrorTerminal(res.Message, time.Now())
 			view.NoteAttempt(time.Now())
@@ -145,5 +157,4 @@ func authenticate(a authenticator, pass string, client *lockd.Client, view *lock
 		}
 		client.Repaint()
 	})
-	auth.Zero([]byte(pass))
 }

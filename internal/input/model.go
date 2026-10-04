@@ -2,28 +2,55 @@
 // clear, masking for display, and buffer zeroing on clear.
 package input
 
+import (
+	"errors"
+	"unicode/utf8"
+)
+
+const MaxPasswordBytes = 4096
+
+var ErrLength = errors.New("Password exceeds 4096 bytes")
+var ErrEncoding = errors.New("Invalid text input")
+
 type Model struct {
-	Pass []rune
+	Pass  []rune
+	bytes int
 }
 
-func (m *Model) Append(text string) {
+func (m *Model) Append(text string) error {
+	if !utf8.ValidString(text) {
+		return ErrEncoding
+	}
+	if len(text) > MaxPasswordBytes-m.bytes {
+		return ErrLength
+	}
+	if text == "" {
+		return nil
+	}
+	// ponytail: one fixed 16 KiB rune allocation avoids secret copies during growth.
+	if m.Pass == nil {
+		m.Pass = make([]rune, 0, MaxPasswordBytes)
+	}
 	for _, r := range text {
 		m.Pass = append(m.Pass, r)
 	}
+	m.bytes += len(text)
+	return nil
 }
 
 func (m *Model) Backspace() {
-	if len(m.Pass) > 0 {
-		m.Pass = m.Pass[:len(m.Pass)-1]
+	if n := len(m.Pass); n > 0 {
+		m.bytes -= utf8.RuneLen(m.Pass[n-1])
+		m.Pass[n-1] = 0
+		m.Pass = m.Pass[:n-1]
 	}
 }
 
-// Clear wipes the buffer (zeroing the rune memory, like auth.Zero for bytes).
+// Clear wipes deleted slots and retained capacity, as well as the live entry.
 func (m *Model) Clear() {
-	for i := range m.Pass {
-		m.Pass[i] = 0
-	}
+	clear(m.Pass[:cap(m.Pass)])
 	m.Pass = m.Pass[:0]
+	m.bytes = 0
 }
 
 // Password returns a copy of the current buffer as text (for PAM prompts).

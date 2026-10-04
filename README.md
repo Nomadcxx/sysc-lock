@@ -10,7 +10,10 @@ Designed for Niri / sysc-shell; works with any conformant compositor.
   Input is sealed per-output; the session is never exposed by the locker dying.
 - Authentication is PAM (`login` service) in-process. There is no bypass flag,
   no test-mode env var, and no IPC unlock path. Test fakes live only in `_test.go`.
-- Credentials are zeroed after use and never cross any process boundary or log.
+- The entry is bounded to 4096 UTF-8 bytes. Mutable storage is wiped on deletion,
+  clear and completion. Go strings and PAM/runtime copies cannot be reliably
+  erased. Passwords do not enter logs or IPC. One hidden PAM prompt is supported;
+  additional prompts fail without reusing the password.
 - A logind sleep inhibitor is held until the compositor confirms `locked`, then
   released — suspend before a lock is fully up is blocked, and the shell can
   order "lock before suspend" around it.
@@ -36,7 +39,7 @@ Exit codes: `0` unlocked, `1` no display / connection lost, `2` lock refused
 (already locked), `3` terminated before lock was established, `4` sleep
 inhibitor unavailable (session stays unlocked), `5` lock ended by compositor.
 
-On the first locked frame across all outputs it prints `sysc-lock: locked`
+On the compositor Locked event it prints `sysc-lock: locked`
 to stdout — sysc-shell uses that line for its spawn handshake.
 
 ## sysc-shell integration (planned, see docs/plans in sysc-shell)

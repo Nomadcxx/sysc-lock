@@ -39,6 +39,9 @@ type Client struct {
 	state    *State
 	onKey    KeyFunc
 	frame    FrameFunc
+	OnEvent  func(Snapshot) // called only on the Wayland owner
+	fatal    error
+	uiError  string
 
 	compositor *client.Compositor
 	shm        *client.Shm
@@ -96,6 +99,7 @@ func Connect(state *State, onKey KeyFunc, frame FrameFunc) (*Client, error) {
 	}
 	c.registry = reg
 	c.registry.SetGlobalHandler(func(g client.RegistryGlobalEvent) { c.global(g) })
+	c.registry.SetGlobalRemoveHandler(func(g client.RegistryGlobalRemoveEvent) { c.removeOutput(OutputID(g.Name)) })
 	if err := display.Roundtrip(); err != nil {
 		ctx.Close()
 		return nil, fmt.Errorf("wayland roundtrip: %w", err)
@@ -196,17 +200,23 @@ func (c *Client) Lock() error {
 	}
 	c.lock = lock
 	lock.SetLockedHandler(func(sessionlock.ExtSessionLockV1LockedEvent) {
-		c.state.Locked()
+		if err := c.state.Locked(); err != nil {
+			c.fatal = err
+		}
+		c.publish()
 	})
 	lock.SetFinishedHandler(func(sessionlock.ExtSessionLockV1FinishedEvent) {
 		// finished before locked is a refusal; after locked it is a
 		// compositor-initiated end. Finished() itself is terminal-safe.
-		c.state.Finished()
+		if err := c.state.Finished(); err != nil {
+			c.fatal = err
+		}
+		c.publish()
 		switch c.state.FinishedDestructor() {
 		case "destroy":
-			_ = c.lock.Destroy()
+			c.fatal = c.lock.Destroy()
 		case "unlock_and_destroy":
-			_ = c.lock.UnlockAndDestroy()
+			c.fatal = c.lock.UnlockAndDestroy()
 		}
 		for _, out := range c.outputs {
 			c.destroyOut(out)
@@ -224,10 +234,15 @@ func (c *Client) addOutput(id OutputID, o *client.Output) {
 	out := &lockOut{id: id, output: o, scale: 1}
 	o.SetScaleHandler(func(ev client.OutputScaleEvent) {
 		if ev.Factor > 0 {
-			c.outputs[id].scale = ev.Factor
+			if c.outputs[id] == out {
+				out.scale = ev.Factor
+			}
 		}
 	})
 	c.outputs[id] = out
+	if err := c.state.AddOutput(id, 0, 0); err != nil {
+		c.failUI(err)
+	}
 	if c.lock != nil && c.state.Phase() >= Requesting && c.state.Phase() < Done {
 		c.createLockSurface(id, out)
 	}
@@ -239,14 +254,17 @@ func (c *Client) createLockSurface(id OutputID, out *lockOut) {
 	}
 	surf, err := c.compositor.CreateSurface()
 	if err != nil {
+		c.failUI(err)
 		return
 	}
 	ls, err := c.lock.GetLockSurface(surf, out.output)
 	if err != nil {
-		surf.Destroy()
+		c.failUI(err)
+		if e := surf.Destroy(); e != nil {
+			c.failUI(e)
+		}
 		return
 	}
-	c.state.AddOutput(id, 0, 0)
 	out.surface, out.lockSurf = surf, ls
 	ls.SetConfigureHandler(func(ev sessionlock.ExtSessionLockSurfaceV1ConfigureEvent) {
 		c.configure(out, ev.Serial, int(ev.Width), int(ev.Height))
@@ -254,27 +272,33 @@ func (c *Client) createLockSurface(id OutputID, out *lockOut) {
 }
 
 func (c *Client) configure(out *lockOut, serial uint32, w, h int) {
-	if out.lockSurf == nil {
+	if out.lockSurf == nil || c.outputs[out.id] != out {
 		return
 	}
 	// The FSM guards the exact pixel size we will commit: logical
 	// configure size times output scale.
 	pw, ph := uint32(w)*uint32(out.scale), uint32(h)*uint32(out.scale)
 	if err := c.state.Configure(out.id, serial, pw, ph); err != nil {
+		c.failUI(err)
 		return
 	}
 	ack, err := c.state.Ack(out.id)
 	if err != nil {
+		c.failUI(err)
 		return
 	}
 	if err := out.lockSurf.AckConfigure(ack); err != nil {
+		c.failUI(err)
 		return
 	}
 	if err := c.commitFrame(out, int(pw), int(ph)); err != nil {
-		fmt.Fprintf(os.Stderr, "sysc-lock: frame: %v\n", err)
+		c.failUI(err)
 		return
 	}
-	c.state.Commit(out.id, pw, ph)
+	if err := c.state.Commit(out.id, pw, ph); err != nil {
+		c.failUI(err)
+	}
+	c.publish()
 }
 
 func (c *Client) commitFrame(out *lockOut, w, h int) error {
@@ -345,9 +369,24 @@ func (c *Client) commitFrame(out *lockOut, w, h int) error {
 }
 
 func (c *Client) freeBuffer(out *lockOut, sb *shmBuffer) {
-	sb.buf.Destroy()
-	sb.pool.Destroy()
-	unix.Munmap(sb.data)
+	if sb.buf != nil {
+		if err := sb.buf.Destroy(); err != nil {
+			c.failUI(err)
+		}
+		sb.buf = nil
+	}
+	if sb.pool != nil {
+		if err := sb.pool.Destroy(); err != nil {
+			c.failUI(err)
+		}
+		sb.pool = nil
+	}
+	if sb.data != nil {
+		if err := unix.Munmap(sb.data); err != nil {
+			c.failUI(err)
+		}
+		sb.data = nil
+	}
 	for i, b := range out.buffers {
 		if b == sb {
 			out.buffers = append(out.buffers[:i], out.buffers[i+1:]...)
@@ -358,38 +397,75 @@ func (c *Client) freeBuffer(out *lockOut, sb *shmBuffer) {
 
 func (c *Client) destroyOut(out *lockOut) {
 	if out.lockSurf != nil {
-		out.lockSurf.Destroy()
+		if err := out.lockSurf.Destroy(); err != nil {
+			c.failUI(err)
+		}
 		out.lockSurf = nil
 	}
-	for _, b := range out.buffers {
-		b.buf.Destroy()
-		b.pool.Destroy()
-		unix.Munmap(b.data)
+	for len(out.buffers) > 0 {
+		c.freeBuffer(out, out.buffers[0])
 	}
 	out.buffers = nil
 	if out.surface != nil {
-		out.surface.Destroy()
+		if err := out.surface.Destroy(); err != nil {
+			c.failUI(err)
+		}
 		out.surface = nil
 	}
 }
 
 // UnlockAndQuit drives the successful-auth path: unlock, tear surfaces down,
 // let Run exit. Safe to call from a Post closure.
-func (c *Client) UnlockAndQuit() {
-	if err := c.state.Unlock(); err != nil {
-		return
-	}
-	c.lock.UnlockAndDestroy()
-	// XML: a client exiting after unlock must wl_display.sync so the
-	// compositor processes unlock_and_destroy before the socket closes.
-	if err := c.display.Roundtrip(); err != nil {
-		fmt.Fprintf(os.Stderr, "sysc-lock: unlock sync: %v\n", err)
+func (c *Client) UnlockAndQuit() error {
+	err := c.state.CompleteUnlock(c.lock.UnlockAndDestroy, c.display.Roundtrip)
+	if err != nil {
+		c.fatal = fmt.Errorf("unlock confirmation: %w", err)
+		return c.fatal
 	}
 	for _, out := range c.outputs {
 		c.destroyOut(out)
 	}
-	c.state.Done()
+	c.publish()
+	return nil
 }
+
+func (c *Client) publish() {
+	if c.OnEvent != nil {
+		v := c.state.Snapshot()
+		v.UIError = c.uiError
+		c.OnEvent(v)
+	}
+}
+func (c *Client) failUI(err error) {
+	c.uiError = "Lock display unavailable"
+	fmt.Fprintf(os.Stderr, "sysc-lock: display: %v\n", err)
+	c.publish()
+}
+func (c *Client) removeOutput(id OutputID) {
+	if out := c.outputs[id]; out != nil {
+		delete(c.outputs, id)
+		c.destroyOut(out)
+		if out.output != nil {
+			if err := out.output.Release(); err != nil {
+				c.failUI(err)
+			}
+		}
+	}
+	c.state.RemoveOutput(id)
+	c.publish()
+}
+
+// AbortBeforeLocked must run on the owner. Signals never infer state from UI.
+func (c *Client) AbortBeforeLocked() bool {
+	ph := c.state.Phase()
+	if ph != Idle && ph != Requesting {
+		return false
+	}
+	c.fatal = ErrAborted
+	return true
+}
+
+var ErrAborted = fmt.Errorf("lock request aborted")
 
 // Post schedules fn to run on the pump goroutine and wakes Run. Safe from any
 // goroutine.
@@ -422,6 +498,9 @@ func (c *Client) Run() error {
 		c.pendMu.Unlock()
 		for _, fn := range pending {
 			fn()
+		}
+		if c.fatal != nil {
+			return c.fatal
 		}
 		ph := c.state.Phase()
 		if ph == Done || ph == Refused || ph == Terminated {
@@ -500,17 +579,7 @@ func (c *Client) State() *State { return c.state }
 
 // HandshakeReady reports whether locked was acknowledged and every known
 // output has committed a first frame.
-func (c *Client) HandshakeReady() bool {
-	if c.state.Phase() != Locked {
-		return false
-	}
-	for _, out := range c.outputs {
-		if out.lockSurf != nil && !out.committed {
-			return false
-		}
-	}
-	return true
-}
+func (c *Client) HandshakeReady() bool { return c.state.HandshakeReady() }
 
 // Repaint schedules a fresh frame commit for every output that already has
 // one, on the pump goroutine. Keystrokes and clock ticks route through this.
@@ -518,7 +587,9 @@ func (c *Client) Repaint() {
 	c.Post(func() {
 		for _, out := range c.outputs {
 			if out.committed && out.w > 0 && out.h > 0 {
-				_ = c.commitFrame(out, out.w, out.h)
+				if err := c.commitFrame(out, out.w, out.h); err != nil {
+					c.failUI(err)
+				}
 			}
 		}
 	})

@@ -18,6 +18,7 @@ type View struct {
 	Layout     string // e.g. "us"; "" hides the indicator
 	Caps       bool
 	Attempts   int
+	Busy       bool
 	Entry      *input.Model
 
 	errMsg   string
@@ -42,6 +43,9 @@ func (v *View) NoteAttempt(now time.Time) { v.Attempts++ }
 
 // StatusLine is the visible error text at now (empty after the 4s window).
 func (v *View) StatusLine(now time.Time) string {
+	if v.Busy {
+		return "Checking…"
+	}
 	if v.errMsg == "" {
 		return ""
 	}
@@ -96,3 +100,5 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
+
+func (v *View) Terminal() bool { return v.errTerm }

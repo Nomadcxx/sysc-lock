@@ -99,5 +99,17 @@ func mapPamError(err error) Result {
 			return Result{OK: false, Terminal: true, Message: "Account expired"}
 		}
 	}
-	return Result{OK: false, Message: err.Error()}
+	return Result{OK: false, Message: "Authentication unavailable"}
+}
+
+// PasswordPrompt supports one hidden prompt; a second could be an OTP.
+func PasswordPrompt(password string) PromptFunc {
+	used := false
+	return func(_ string, echo bool) (string, error) {
+		if used || echo {
+			return "", errors.New("Additional authentication prompt unsupported")
+		}
+		used = true
+		return password, nil
+	}
 }

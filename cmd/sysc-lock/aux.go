@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
+	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"io"
 	"os"
 	"os/user"
 	"path/filepath"
-	"time"
+	"strconv"
 
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
@@ -18,14 +19,12 @@ type authenticator interface {
 	User() string
 }
 
-func currentUser() string {
-	if u, err := user.Current(); err == nil && u.Username != "" {
-		return u.Username
+func currentUser() (string, error) {
+	u, err := user.LookupId(strconv.Itoa(os.Getuid()))
+	if err != nil || u.Username == "" {
+		return "", fmt.Errorf("cannot resolve real UID %d", os.Getuid())
 	}
-	if n := os.Getenv("USER"); n != "" {
-		return n
-	}
-	return "unknown"
+	return u.Username, nil
 }
 
 func palettePath() string {
@@ -45,10 +44,7 @@ func palettePath() string {
 // only exit.
 func watchSignals(sigs chan os.Signal, c *lockd.Client, release func()) {
 	for range sigs {
-		if !c.HandshakeReady() {
-			release()
-			os.Exit(3)
-		}
+		c.Post(func() { c.AbortBeforeLocked() })
 	}
 }
 
@@ -59,29 +55,50 @@ func emitLockedHandshake(w io.Writer) {
 }
 
 // enterGate serializes PAM: the pump goroutine is the only mutator.
-type enterGate struct{ busy bool }
+type enterGate struct {
+	busy       bool
+	generation uint64
+}
 
 func (g *enterGate) try(pass string) bool {
 	if g.busy || pass == "" {
 		return false
 	}
 	g.busy = true
+	g.generation++
 	return true
 }
 
 func (g *enterGate) release() { g.busy = false }
 
-// watchLocked prints the handshake line the shell waits for, then drops the
-// sleep inhibitor: locked frames are presented on every output, so suspend
-// (if it comes) happens behind the lock.
+// watchLocked installs an owner callback; the protocol event is the handshake.
 func watchLocked(c *lockd.Client, release func()) {
-	for {
-		if c.HandshakeReady() {
+	emitted := false
+	c.OnEvent = func(v lockd.Snapshot) {
+		if v.Phase == lockd.Locked && !emitted {
+			emitted = true
 			emitLockedHandshake(os.Stdout)
-			os.Stdout.Sync()
 			release()
-			return
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+func (g *enterGate) handle(m *input.Model, k lockd.Key) (bool, error) {
+	if g.busy {
+		return false, nil
+	}
+	switch {
+	case k.Enter:
+		return g.try(m.Password()), nil
+	case k.Backspace:
+		m.Backspace()
+	case k.Escape:
+		m.Clear()
+	case k.Text != "":
+		return false, m.Append(k.Text)
+	}
+	return false, nil
+}
+func (g *enterGate) accept(generation uint64, phase lockd.Phase) bool {
+	return g.busy && g.generation == generation && phase == lockd.Locked
 }

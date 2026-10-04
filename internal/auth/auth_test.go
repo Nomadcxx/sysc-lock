@@ -75,3 +75,16 @@ func TestPAMMissingService(t *testing.T) {
 func TestPAMImplementsInterface(t *testing.T) {
 	var _ Authenticator = (*PAM)(nil)
 }
+
+func TestAdditionalPamPromptRejected(t *testing.T) {
+	response := PasswordPrompt("secret")
+	if got, err := response("Password", false); err != nil || got != "secret" {
+		t.Fatal(err)
+	}
+	if got, err := response("OTP", false); err == nil || got != "" {
+		t.Fatal("password reused for OTP")
+	}
+	if got, err := PasswordPrompt("secret")("Visible", true); err == nil || got != "" {
+		t.Fatal("visible prompt accepted")
+	}
+}
