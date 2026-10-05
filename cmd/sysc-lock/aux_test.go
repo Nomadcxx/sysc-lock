@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"github.com/Nomadcxx/sysc-lock/internal/ambient"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
 	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -219,4 +222,67 @@ func TestSubmittingCancelsThePopupAndAnyHold(t *testing.T) {
 	if a := m.Tick(time.Now().Add(time.Hour)); a != "" {
 		t.Fatal("a cancelled hold can never fire", a)
 	}
+}
+
+func writeAmbientSnapshot(t *testing.T, asOf time.Time) (string, time.Time) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ambient.json")
+	now := time.Unix(900, 0)
+	if asOf.IsZero() {
+		asOf = now
+	}
+	s := ambient.Snapshot{AsOf: asOf, Unit: "celsius"}
+	body, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path, now
+}
+
+func TestLoadAmbientMissingAndStale(t *testing.T) {
+	now := time.Unix(900, 0)
+	if got := loadAmbient("/definitely/missing.json", now, 40); got != "" {
+		t.Fatalf("missing file: got %q, want \"\"", got)
+	}
+	path, now := writeAmbientSnapshot(t, now.Add(-6*time.Second))
+	if got := loadAmbient(path, now, 40); got != "" {
+		t.Fatalf("stale file: got %q, want \"\"", got)
+	}
+}
+
+func TestLoadAmbientGoodFile(t *testing.T) {
+	path, now := writeAmbientSnapshot(t, time.Unix(0, 0))
+	if got := loadAmbient(path, now, 40); got != "" {
+		t.Fatalf("empty snapshot: got %q, want \"\"", got)
+	}
+
+	dir := t.TempDir()
+	path = filepath.Join(dir, "ambient.json")
+	pct := 82
+	temp := 18.2
+	body, err := json.Marshal(ambient.Snapshot{
+		AsOf:       now,
+		BatteryPct: &pct,
+		Link:       ambient.LinkWifi,
+		Media:      ambient.Playing,
+		Temp:       &temp,
+		Unit:       "celsius",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if got, want := loadAmbient(path, now, 40), "82% · Wi-Fi · playing · 18°"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestKillAmbientNilIsSafe(t *testing.T) {
+	t.Cleanup(killAmbient(nil))
 }

@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Nomadcxx/sysc-lock/internal/ambient"
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/config"
 	"github.com/Nomadcxx/sysc-lock/internal/inhibit"
@@ -132,6 +133,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		} else {
 			view.Hint = power.ScreenHelpPlain
 		}
+		view.Ambient = loadAmbient(ambient.Path(), now, max(1, fb.Width/12))
 		if background == nil {
 			view.Render(fb, now)
 		} else {
@@ -210,6 +212,8 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
 		return lockd.Idle, err
 	}
+	amb := startAmbient()
+	defer amb.stop()
 	if err := client.Run(); err != nil {
 
 		fmt.Fprintln(os.Stderr, "sysc-lock: connection lost:", err)
