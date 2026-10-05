@@ -96,7 +96,7 @@ func TestOfflineViewSnapshots(t *testing.T) {
 			if name == "ambient" {
 				v.Reveal.Show(now)
 				v.Hint = power.ScreenHelp
-				v.Ambient = "82% · Wi-Fi · playing · 18°"
+				v.Ambient = "82% • Wi-Fi • playing • 18°"
 			}
 			if name == "reduced-motion" {
 				v.Render(fb, now)

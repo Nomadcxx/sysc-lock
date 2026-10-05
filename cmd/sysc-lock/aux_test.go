@@ -278,7 +278,7 @@ func TestLoadAmbientGoodFile(t *testing.T) {
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if got, want := loadAmbient(path, now, 40), "82% · Wi-Fi · playing · 18°"; got != want {
+	if got, want := loadAmbient(path, now, 40), "82% • Wi-Fi • playing • 18°"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }

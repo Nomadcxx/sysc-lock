@@ -17,7 +17,7 @@ const (
 	Playing   = "playing"
 	Paused    = "paused"
 	Stopped   = "stopped"
-	Sep       = " · "
+	Sep       = " • "
 )
 
 type Snapshot struct {

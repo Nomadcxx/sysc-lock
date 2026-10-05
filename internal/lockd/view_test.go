@@ -291,7 +291,7 @@ func TestSceneStaysInsideItsBounds(t *testing.T) {
 		v.Entry.Append(strings.Repeat("a", 200))
 		v.Reveal.Show(now)
 		v.Hint = "F4 Power • Enter Unlock"
-		v.Ambient = strings.Repeat("82% · Wi-Fi · playing · 18° · ", 10)
+		v.Ambient = strings.Repeat("82% • Wi-Fi • playing • 18° • ", 10)
 		v.Power = &PowerView{
 			Open: true, Title: "Power Options", Progress: 40, Help: "help",
 			Rows: []PowerRow{{Title: "Log out"}, {Title: "Reboot", Selected: true}, {Title: "Cancel"}},
@@ -314,7 +314,7 @@ func TestHiddenEntryPaintsNoAmbientInk(t *testing.T) {
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	v := NewView(theme.Default(), "u", "h")
 	v.Reduced = true
-	v.Ambient = "82% · Wi-Fi · playing · 18°"
+	v.Ambient = "82% • Wi-Fi • playing • 18°"
 	fb := render.New(960, 720)
 	v.Render(fb, now)
 	s := Layout(960, 720, 1, "", v.clockText(now))
@@ -332,7 +332,7 @@ func TestRevealedAmbientSitsOnGroundInMutedInk(t *testing.T) {
 	v := NewView(theme.Default(), "u", "h")
 	v.Reduced = true
 	v.Reveal.Show(now)
-	v.Ambient = "82% · Wi-Fi"
+	v.Ambient = "82% • Wi-Fi"
 	fb := render.New(960, 720)
 	v.Render(fb, now)
 	s := Layout(960, 720, 1, "", v.clockText(now))

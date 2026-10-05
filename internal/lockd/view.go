@@ -257,7 +257,7 @@ func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectang
 	if v.Num {
 		parts = append(parts, "Num Lock")
 	}
-	drawTextBox(fb, indicators, indicators.Min.Y+indicators.Dy()*3/4, strings.Join(parts, " · "), v.textPx(indicators.Dy()*3/5, indicators), panelInk)
+	drawTextBox(fb, indicators, indicators.Min.Y+indicators.Dy()*3/4, strings.Join(parts, " • "), v.textPx(indicators.Dy()*3/5, indicators), panelInk)
 }
 
 func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
