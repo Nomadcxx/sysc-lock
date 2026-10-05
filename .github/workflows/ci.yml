@@ -21,6 +21,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # The locker authenticates through PAM, so vet and test need its headers.
+      - name: install libpam
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpam0g-dev
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - name: vet
