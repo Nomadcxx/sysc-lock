@@ -97,3 +97,25 @@ func TestComposedRepeatKeepsCommittedText(t *testing.T) {
 		t.Fatal("composed repeat changed credential text", got)
 	}
 }
+
+func TestSpecialsMapsEveryKeyTheMenuNeeds(t *testing.T) {
+	for _, tc := range []struct {
+		sym                 uint32
+		enter, up, down, f4 bool
+	}{
+		{symReturn, true, false, false, false},
+		{symKP_Enter, true, false, false, false},
+		{symUp, false, true, false, false},
+		{symDown, false, false, true, false},
+		{symF4, false, false, false, true},
+		{symBackspace, false, false, false, false},
+		{symEscape, false, false, false, false},
+		{'a', false, false, false, false},
+		{0xffcb, false, false, false, false}, // XK_F14, not F4
+	} {
+		enter, up, down, f4 := specials(tc.sym)
+		if enter != tc.enter || up != tc.up || down != tc.down || f4 != tc.f4 {
+			t.Fatalf("%#x -> %v %v %v %v", tc.sym, enter, up, down, f4)
+		}
+	}
+}

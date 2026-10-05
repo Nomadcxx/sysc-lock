@@ -20,6 +20,9 @@ const (
 	symKP_Enter  = 0xff8d
 	symBackspace = 0xff08
 	symEscape    = 0xff1b
+	symUp        = 0xff52
+	symDown      = 0xff54
+	symF4        = 0xffc1
 )
 
 type keymap struct {
@@ -214,10 +217,22 @@ func (c *Client) setupKeyboard() {
 		if c.keymap != nil && c.keymap.compose != nil {
 			c.keymap.compose.Reset()
 		}
+		// A missed release would leave a hold-to-confirm running and fire a
+		// reboot; leaving the keyboard releases everything.
+		c.enterCode = 0
+		if c.onKey != nil {
+			c.onKey(Key{Released: true})
+		}
 	})
 	kbd.SetKeyHandler(func(ev client.KeyboardKeyEvent) {
 		if ev.State != 1 {
 			c.repeat.release(ev.Key)
+			// resolve feeds the compose state, so a release must not call it.
+			// Deliver only the Enter release the hold bar needs.
+			if c.enterCode != 0 && ev.Key == c.enterCode && c.onKey != nil {
+				c.enterCode = 0
+				c.onKey(Key{Enter: true, Released: true})
+			}
 			return
 		}
 		if c.keymap == nil {
@@ -227,13 +242,11 @@ func (c *Client) setupKeyboard() {
 		k := c.keymap.indicators()
 		k.Text = text
 		k.composed = c.keymap.lastComposed
-		switch sym {
-		case symReturn, symKP_Enter:
-			k.Enter = true
-		case symBackspace:
-			k.Backspace = true
-		case symEscape:
-			k.Escape = true
+		k.Backspace = sym == symBackspace
+		k.Escape = sym == symEscape
+		k.Enter, k.Up, k.Down, k.F4 = specials(sym)
+		if k.Enter {
+			c.enterCode = ev.Key
 		}
 		c.repeat.press(ev.Key, k, time.Now())
 		if !c.keymap.mapData.KeyRepeats(xkb.Keycode(ev.Key + 8)) {
@@ -243,6 +256,22 @@ func (c *Client) setupKeyboard() {
 			c.onKey(k)
 		}
 	})
+}
+
+// specials reports the key flags a keysym carries. Nothing else in this file
+// knows the numeric keysyms, so the mapping is testable without a seat.
+func specials(sym uint32) (enter, up, down, f4 bool) {
+	switch sym {
+	case symReturn, symKP_Enter:
+		enter = true
+	case symUp:
+		up = true
+	case symDown:
+		down = true
+	case symF4:
+		f4 = true
+	}
+	return
 }
 
 func (c *Client) repeatKey() Key {

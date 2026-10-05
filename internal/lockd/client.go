@@ -28,6 +28,13 @@ type Key struct {
 	NumLock   bool
 	Layout    string
 	composed  bool // a completed compose sequence repeats its committed character
+	Up        bool
+	Down      bool
+	F4        bool
+	// Released marks a key going up. Enter releases drive the hold-to-confirm
+	// bar, and the keyboard-leave event releases every key at once so a missed
+	// release can never leave a hold running.
+	Released bool
 }
 
 // KeyFunc receives every pressed key.
@@ -51,13 +58,16 @@ type Client struct {
 	uiError      string
 	lastSnapshot *Snapshot
 
-	compositor         *client.Compositor
-	shm                *client.Shm
-	shmFmt             uint32
-	haveFmt            bool
-	seat               *client.Seat
-	keymap             *keymap
-	keyboard           *client.Keyboard
+	compositor *client.Compositor
+	shm        *client.Shm
+	shmFmt     uint32
+	haveFmt    bool
+	seat       *client.Seat
+	keymap     *keymap
+	keyboard   *client.Keyboard
+	// enterCode is the keysym of the Enter key that is currently down, so its
+	// release can be delivered. Zero means Enter is not down.
+	enterCode          uint32
 	pointer            *client.Pointer
 	pointerOut         *lockOut
 	pointerX, pointerY float64
