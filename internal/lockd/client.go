@@ -72,6 +72,7 @@ type Client struct {
 	effect, palette    string
 	wallpaper          *wallpaperAsset
 	reduced, frozen    bool
+	effectEvery        time.Duration
 	resumeAt           time.Time
 	OnDeadline         func(time.Time) time.Time
 	deadline           time.Time

@@ -35,11 +35,40 @@ func TestBackgroundStallKeepsForegroundResponsive(t *testing.T) {
 func TestFrameCallbackPacesEffect(t *testing.T) {
 	now := time.Now()
 	out := &lockOut{lastFrame: now}
-	if out.effectDue(now.Add(20 * time.Millisecond)) {
+	if out.effectDue(now.Add(20*time.Millisecond), defaultEffectEvery) {
 		t.Fatal("exceeded 20fps")
 	}
-	if !out.effectDue(now.Add(50 * time.Millisecond)) {
+	if !out.effectDue(now.Add(50*time.Millisecond), defaultEffectEvery) {
 		t.Fatal("missed frame deadline")
+	}
+}
+
+func TestEffectRateSetsTheTickInterval(t *testing.T) {
+	c := &Client{}
+	if got := c.effectInterval(); got != defaultEffectEvery {
+		t.Fatal(got)
+	}
+	c.SetEffectRate(20)
+	if got := c.effectInterval(); got != 45*time.Millisecond {
+		t.Fatal("20 fps keeps a 10% tolerance under 50ms:", got)
+	}
+	c.SetEffectRate(60)
+	if got := c.effectInterval(); got != 14999999*time.Nanosecond {
+		t.Fatal(got)
+	}
+	for _, bad := range []int{0, -3, 1, 100000} {
+		c.SetEffectRate(bad)
+		if got := c.effectInterval(); got < 7*time.Millisecond || got > 90*time.Millisecond {
+			t.Fatalf("rate %d produced %v", bad, got)
+		}
+	}
+	out := &lockOut{lastFrame: time.Unix(10, 0)}
+	c.SetEffectRate(60)
+	if out.effectDue(out.lastFrame.Add(10*time.Millisecond), c.effectInterval()) {
+		t.Fatal("due too early")
+	}
+	if !out.effectDue(out.lastFrame.Add(16*time.Millisecond), c.effectInterval()) {
+		t.Fatal("a vsync landing slightly early must not be skipped")
 	}
 }
 

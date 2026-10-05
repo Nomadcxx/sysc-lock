@@ -103,8 +103,34 @@ func (out *lockOut) backgroundPixels() []byte {
 	}
 	return nil
 }
-func (out *lockOut) effectDue(now time.Time) bool {
-	return out.lastFrame.IsZero() || now.Sub(out.lastFrame) >= 50*time.Millisecond
+
+const (
+	defaultEffectEvery = 50 * time.Millisecond
+	minEffectFPS       = 10
+	maxEffectFPS       = 120
+)
+
+func (out *lockOut) effectDue(now time.Time, every time.Duration) bool {
+	return out.lastFrame.IsZero() || now.Sub(out.lastFrame) >= every
+}
+
+// SetEffectRate sets effect ticks per second, clamped to 10..120. The interval
+// carries a 10% tolerance so a frame callback that lands a little early is not
+// skipped, which would otherwise halve the rate.
+func (c *Client) SetEffectRate(fps int) {
+	if fps <= 0 {
+		c.effectEvery = 0
+		return
+	}
+	fps = max(minEffectFPS, min(maxEffectFPS, fps))
+	c.effectEvery = time.Second / time.Duration(fps) * 9 / 10
+}
+
+func (c *Client) effectInterval() time.Duration {
+	if c.effectEvery > 0 {
+		return c.effectEvery
+	}
+	return defaultEffectEvery
 }
 func (c *Client) EnableBackground(effect, palette string, reduced bool) {
 	c.effect, c.palette, c.reduced = effect, palette, reduced
@@ -134,7 +160,7 @@ func (c *Client) scheduleBackground(out *lockOut, now time.Time) {
 	if b != nil && (b.busy || b.failed || ((c.reduced || c.wallpaper != nil) && b.cached.width == out.w && b.cached.height == out.h && b.cached.pixels != nil)) {
 		return
 	}
-	if !out.effectDue(now) {
+	if !out.effectDue(now, c.effectInterval()) {
 		if err := c.armFrame(out, true); err != nil {
 			c.failUI(err)
 		}
