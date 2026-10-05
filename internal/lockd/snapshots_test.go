@@ -57,7 +57,7 @@ func TestOfflineViewSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 10, 5, 21, 47, 0, 0, time.UTC)
-	for _, name := range []string{"hidden", "revealed", "busy", "error", "reduced-motion", "narrow", "power", "power-hold"} {
+	for _, name := range []string{"hidden", "revealed", "busy", "error", "reduced-motion", "narrow", "power", "power-hold", "ambient"} {
 		t.Run(name, func(t *testing.T) {
 			w, h := 960, 720
 			if name == "narrow" {
@@ -93,6 +93,11 @@ func TestOfflineViewSnapshots(t *testing.T) {
 					v.Power.Rows = append(v.Power.Rows, PowerRow{Title: a.Label(), Selected: i == m.Selected()})
 				}
 			}
+			if name == "ambient" {
+				v.Reveal.Show(now)
+				v.Hint = power.ScreenHelp
+				v.Ambient = "82% · Wi-Fi · playing · 18°"
+			}
 			if name == "reduced-motion" {
 				v.Render(fb, now)
 			} else {
@@ -123,6 +128,23 @@ func TestOfflineViewSnapshots(t *testing.T) {
 			}
 			if closeErr != nil {
 				t.Fatal(closeErr)
+			}
+			if name == "hidden" || name == "ambient" {
+				s := Layout(w, h, 1, "", v.clockText(now))
+				ground := 0
+				for y := s.Ambient.Min.Y; y < s.Ambient.Max.Y; y++ {
+					for x := s.Ambient.Min.X; x < s.Ambient.Max.X; x++ {
+						if color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA) == panelGround {
+							ground++
+						}
+					}
+				}
+				if name == "hidden" && ground != 0 {
+					t.Fatalf("hidden: ambient slot painted %d ground pixels", ground)
+				}
+				if name == "ambient" && ground < 100 {
+					t.Fatalf("ambient: row missing its ground, counted %d pixels", ground)
+				}
 			}
 			if name == "power" || name == "power-hold" {
 				s := Layout(w, h, 1, "", v.clockText(now))
