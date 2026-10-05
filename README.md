@@ -47,7 +47,7 @@ is supported. Conflicting or stale registration fails explicitly.
 Presentation loads `$XDG_CONFIG_HOME/sysc-lock/config.json` at each acquisition:
 
 ```json
-{"effect":"rain","palette":"nord","reduced_motion":false,"clock_style":"kompaktblk","clock_24h":false,"effect_fps":20}
+{"effect":"rain","palette":"nord","reduced_motion":false,"clock_style":"kompaktblk","clock_24h":false,"effect_fps":20,"power_actions":["logout","reboot","shutdown"]}
 ```
 
 `clock_style` is `kompaktblk`, `phm_blocky_reverse` or `plain`; an unknown
@@ -55,6 +55,12 @@ value uses `kompaktblk`. `effect_fps` is effect ticks per second (10–120); the
 effects advance one fixed step per tick, so it also changes animation speed.
 The screen shows the clock until a key is pressed; that key only reveals the
 password entry. The entry hides again after 8 seconds when empty, or on Esc.
+`power_actions` is the ordered Power Options menu; unknown names and duplicates
+are dropped, and an empty list removes the menu and the `F4 Power` hint. `F4`
+opens the popup (a second `F4` resets to the first row; `Esc` closes it), `↑↓`
+moves, and Log out, Reboot and Shutdown need Enter held for a second and a half.
+An action logind will not permit is left out of the menu, so it never offers a
+dead row. A refused call shows `Not permitted` and typing works again.
 
 Shell Settings → Lock Screen edits this file and provides a labeled ordinary
 preview. Apply affects the next lock. The shared renderer comes from the pinned

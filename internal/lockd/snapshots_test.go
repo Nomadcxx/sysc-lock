@@ -2,6 +2,7 @@ package lockd
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"image/png"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/sysc-lock/internal/input"
+	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
 	"github.com/Nomadcxx/sysc-terminal/renderer"
@@ -55,7 +57,7 @@ func TestOfflineViewSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 10, 5, 21, 47, 0, 0, time.UTC)
-	for _, name := range []string{"hidden", "revealed", "busy", "error", "reduced-motion", "narrow"} {
+	for _, name := range []string{"hidden", "revealed", "busy", "error", "reduced-motion", "narrow", "power", "power-hold"} {
 		t.Run(name, func(t *testing.T) {
 			w, h := 960, 720
 			if name == "narrow" {
@@ -76,6 +78,20 @@ func TestOfflineViewSnapshots(t *testing.T) {
 			if name == "error" {
 				v.SetError("Incorrect password", now)
 				v.Caps = true
+			}
+			if name == "power" || name == "power-hold" {
+				m := power.New(power.DefaultOrder, power.Availability{Reboot: true, Shutdown: true}, "c2")
+				m.Press(power.Key{F4: true}, now)
+				progress := -1
+				if name == "power-hold" {
+					m.Press(power.Key{Enter: true}, now)
+					progress = m.Progress(now.Add(750 * time.Millisecond))
+				}
+				v.Hint = power.ScreenHelp
+				v.Power = &PowerView{Open: m.Open(), Title: power.Title, Help: power.Help, Progress: progress}
+				for i, a := range m.Items() {
+					v.Power.Rows = append(v.Power.Rows, PowerRow{Title: a.Label(), Selected: i == m.Selected()})
+				}
 			}
 			if name == "reduced-motion" {
 				v.Render(fb, now)
@@ -108,9 +124,31 @@ func TestOfflineViewSnapshots(t *testing.T) {
 			if closeErr != nil {
 				t.Fatal(closeErr)
 			}
+			if name == "power" || name == "power-hold" {
+				s := Layout(w, h, 1, "", v.clockText(now))
+				danger := 0
+				for y := 0; y < h; y++ {
+					for x := 0; x < w; x++ {
+						c := color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA)
+						edge := x == 0 || y == 0 || x == w-1 || y == h-1
+						if edge && (c == panelGround || c == panelInk || c == panelDanger || c == panelAccent || c == panelMuted) {
+							t.Fatalf("%s: chrome on the output edge at %d,%d", name, x, y)
+						}
+						if c == panelDanger {
+							danger++
+							if !image.Pt(x, y).In(s.Menu) {
+								t.Fatalf("%s: danger ink outside the popup at %d,%d", name, x, y)
+							}
+						}
+					}
+				}
+				if danger < 500 {
+					t.Fatalf("%s: selected bar missing, counted %d danger pixels", name, danger)
+				}
+			}
 		})
 	}
-	evidence := fmt.Sprintf("Offline raster evidence only; no lock/PAM/session qualification.\nShared renderer: github.com/Nomadcxx/sysc-terminal v0.0.0-20261004174459-4e522749ac8b, rain/nord, 20 steps.\nFake account: Sample Account. Fixed UTC clock: 2026-10-05 21:47.\n960x720 and compact 320x240, scale 1. Reduced-motion sample uses the approved solid fallback.\nOpaque foreground role WCAG luminance ratios against panel #10141c:\ntext #f0f4fa %.2f:1 (minimum 4.5)\nstatus #ffb4b4 %.2f:1 (minimum 4.5)\ncontrol/focus #93c5fd %.2f:1 (minimum 3)\nGlyph edge antialiasing is excluded from WCAG role contrast.\n", panelContrast(panelInk), panelContrast(panelDanger), panelContrast(panelAccent))
+	evidence := fmt.Sprintf("Offline raster evidence only; no lock/PAM/session qualification.\nShared renderer: github.com/Nomadcxx/sysc-terminal v0.0.0-20261004174459-4e522749ac8b, rain/nord, 20 steps.\nFake account: Sample Account. Fixed UTC clock: 2026-10-05 21:47.\n960x720 and compact 320x240, scale 1. Reduced-motion sample uses the approved solid fallback.\nOpaque foreground role WCAG luminance ratios against panel #10141c:\ntext #f0f4fa %.2f:1 (minimum 4.5)\nstatus #ffb4b4 %.2f:1 (minimum 4.5)\ncontrol/focus #93c5fd %.2f:1 (minimum 3)\nhelp/muted #828a96 %.2f:1 (minimum 4.5)\nGlyph edge antialiasing is excluded from WCAG role contrast.\n", panelContrast(panelInk), panelContrast(panelDanger), panelContrast(panelAccent), panelContrast(panelMuted))
 	worst := color.NRGBA{R: 127, G: 127, B: 127, A: 255}
 	artRatio := (max(luminance(panelInk), luminance(worst)) + .05) / (min(luminance(panelInk), luminance(worst)) + .05)
 	evidence += fmt.Sprintf("Clock-forward composition, 12-hour clock. Art ink over the brightest dimmed effect pixel (white halved): %.2f:1 (minimum 3).\n", artRatio)
