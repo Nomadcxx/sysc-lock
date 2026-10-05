@@ -4,6 +4,7 @@ import (
 	"image"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestStylesHaveEveryClockGlyph(t *testing.T) {
@@ -135,5 +136,35 @@ func TestPickFitsWidestClockOrFallsBack(t *testing.T) {
 	}
 	if style, _, _ := Pick("kompaktblk", widest, 120, 80); !style.Plain() {
 		t.Fatal("tiny output must fall back to plain")
+	}
+}
+
+func TestPrintLimitIsCappedAtOneSecond(t *testing.T) {
+	for _, c := range []struct {
+		elapsed time.Duration
+		total   int
+		want    int
+	}{
+		{-time.Second, 100, 0}, {0, 100, 0}, {500 * time.Millisecond, 100, 50},
+		{time.Second, 100, 100}, {time.Hour, 100, 100}, {time.Second, 0, 0},
+		{250 * time.Millisecond, 1000, 250},
+	} {
+		if got := PrintLimit(c.elapsed, c.total); got != c.want {
+			t.Fatalf("PrintLimit(%v,%d)=%d want %d", c.elapsed, c.total, got, c.want)
+		}
+	}
+}
+
+func TestJoltShiftsLeftThenRightThenRests(t *testing.T) {
+	for _, c := range []struct {
+		elapsed time.Duration
+		want    int
+	}{
+		{-1, 0}, {0, -1}, {39 * time.Millisecond, -1}, {40 * time.Millisecond, 1},
+		{79 * time.Millisecond, 1}, {80 * time.Millisecond, 0}, {JoltDuration, 0}, {time.Hour, 0},
+	} {
+		if got := Jolt(c.elapsed); got != c.want {
+			t.Fatalf("Jolt(%v)=%d want %d", c.elapsed, got, c.want)
+		}
 	}
 }
