@@ -38,6 +38,23 @@ func loadAmbient(path string, now time.Time, maxRunes int) string {
 	return snap.Line(maxRunes)
 }
 
+// ambientRow caches the status line so the owner touches the snapshot file at
+// most once a second on its existing repaints — it never polls in a loop of
+// its own.
+type ambientRow struct {
+	path string
+	at   time.Time
+	line string
+}
+
+func (r *ambientRow) Get(now time.Time, maxRunes int) string {
+	if r.at.IsZero() || now.Sub(r.at) >= time.Second {
+		r.at = now
+		r.line = loadAmbient(r.path, now, maxRunes)
+	}
+	return r.line
+}
+
 // ambientChild is the running collector, or the zero value when it never
 // started; stop is safe either way.
 type ambientChild struct{ cmd *exec.Cmd }

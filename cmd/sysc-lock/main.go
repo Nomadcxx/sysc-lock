@@ -83,6 +83,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 
 	st := lockd.New()
 	sessionID := os.Getenv("XDG_SESSION_ID")
+	row := &ambientRow{path: ambient.Path()}
 	menu := power.New(nil, power.Availability{}, sessionID)
 	executor := power.Executor{Session: sessionID}
 	var client *lockd.Client
@@ -133,7 +134,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		} else {
 			view.Hint = power.ScreenHelpPlain
 		}
-		view.Ambient = loadAmbient(ambient.Path(), now, max(1, fb.Width/12))
+		view.Ambient = row.Get(now, max(1, fb.Width/12))
 		if background == nil {
 			view.Render(fb, now)
 		} else {

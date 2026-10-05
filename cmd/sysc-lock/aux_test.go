@@ -286,3 +286,31 @@ func TestLoadAmbientGoodFile(t *testing.T) {
 func TestKillAmbientNilIsSafe(t *testing.T) {
 	t.Cleanup(killAmbient(nil))
 }
+
+func TestAmbientRowReadsOncePerSecond(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ambient.json")
+	base := time.Unix(900, 0)
+	write := func(pct int) {
+		t.Helper()
+		body, err := json.Marshal(ambient.Snapshot{AsOf: base, BatteryPct: &pct})
+		if err != nil {
+			t.Fatalf("json.Marshal: %v", err)
+		}
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+	write(82)
+	row := ambientRow{path: path}
+	if got, want := row.Get(base, 40), "82%"; got != want {
+		t.Fatalf("first read: got %q, want %q", got, want)
+	}
+	write(50)
+	if got, want := row.Get(base.Add(500*time.Millisecond), 40), "82%"; got != want {
+		t.Fatalf("within the same second: got %q, want cached %q", got, want)
+	}
+	if got, want := row.Get(base.Add(1100*time.Millisecond), 40), "50%"; got != want {
+		t.Fatalf("a second later: got %q, want refreshed %q", got, want)
+	}
+}
