@@ -16,6 +16,9 @@ func CellWidth(rows []string, width, height int) int {
 // Pick returns the first style that fits: the configured one, the default,
 // then plain. plain returns no rows and a zero cell width.
 func Pick(name, text string, width, height int) (Style, []string, int) {
+	if name == Plain {
+		return Lookup(Plain), nil, 0
+	}
 	for _, n := range []string{name, DefaultStyle} {
 		s := Lookup(n)
 		if s.Plain() {

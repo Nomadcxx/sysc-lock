@@ -105,6 +105,13 @@ func TestWordmarkUsesSupportedGlyphs(t *testing.T) {
 	}
 }
 
+func TestPickHonorsConfiguredPlain(t *testing.T) {
+	style, rows, cw := Pick(Plain, "12:59:59 PM", 1920, 1080)
+	if !style.Plain() || style.Name != Plain || rows != nil || cw != 0 {
+		t.Fatal(style, rows, cw)
+	}
+}
+
 func TestPickFitsWidestClockOrFallsBack(t *testing.T) {
 	const widest = "12:59:59 PM"
 	style, rows, cw := Pick("kompaktblk", widest, 1920, 1080)
