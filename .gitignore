@@ -19,3 +19,6 @@ go.sum.backup
 /sysc-lock
 /sysc-lock-*
 *.test
+
+# Local git worktrees
+/.worktrees/
