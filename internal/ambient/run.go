@@ -13,7 +13,11 @@ func Run(ctx context.Context, path string, tick time.Duration, gather func(time.
 	if path == "" {
 		return fmt.Errorf("ambient path empty")
 	}
-	write := func() { _ = Write(path, gather(time.Now())) }
+	write := func() {
+		s := gather(time.Now())
+		s.AsOf = time.Now()
+		_ = Write(path, s)
+	}
 	write()
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()

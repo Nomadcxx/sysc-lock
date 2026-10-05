@@ -1,9 +1,9 @@
 package ambient
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -61,5 +61,26 @@ func TestWriteRejectsOversizedDecode(t *testing.T) {
 	if _, err := Load(path, time.Now()); err == nil {
 		t.Fatal("oversized must fail")
 	}
-	_ = json.Unmarshal
+}
+
+func TestLoadFIFODoesNotBlock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ambient.json")
+	if err := syscall.Mkfifo(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := Load(path, time.Now()); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("accepted a FIFO snapshot")
+		}
+	case <-time.After(200 * time.Millisecond):
+		writer, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if err == nil {
+			writer.Close()
+			<-done
+		}
+		t.Fatal("FIFO snapshot blocked the owner")
+	}
 }

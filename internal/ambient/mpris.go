@@ -1,8 +1,10 @@
 package ambient
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -48,17 +50,21 @@ func ReadMedia(b Bus) string {
 type dbusBus struct{ conn *dbus.Conn }
 
 func (b dbusBus) Names() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	var names []string
-	if err := b.conn.BusObject().Call("org.freedesktop.DBus.ListNames", 0).Store(&names); err != nil {
+	if err := b.conn.BusObject().CallWithContext(ctx, "org.freedesktop.DBus.ListNames", 0).Store(&names); err != nil {
 		return nil
 	}
 	return names
 }
 
 func (b dbusBus) PlaybackStatus(dest string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	var v dbus.Variant
-	err := b.conn.Object(dest, dbus.ObjectPath("/org/mpris/MediaPlayer2")).Call(
-		"org.freedesktop.DBus.Properties.Get", 0,
+	err := b.conn.Object(dest, dbus.ObjectPath("/org/mpris/MediaPlayer2")).CallWithContext(
+		ctx, "org.freedesktop.DBus.Properties.Get", 0,
 		"org.mpris.MediaPlayer2.Player", "PlaybackStatus").Store(&v)
 	if err != nil {
 		return "", err

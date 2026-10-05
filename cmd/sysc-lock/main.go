@@ -134,7 +134,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		} else {
 			view.Hint = power.ScreenHelpPlain
 		}
-		view.Ambient = row.Get(now, max(1, fb.Width/12))
+		view.Ambient = row.Get(now, max(8, lockd.Layout(fb.Width, fb.Height, scale, view.StyleName, "12:59:59 PM").Entry.Dx()/8))
 		if background == nil {
 			view.Render(fb, now)
 		} else {
@@ -194,18 +194,6 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	}
 	view.StyleName, view.Clock24, view.Reduced = cfg.ClockStyle, cfg.Clock24h, cfg.ReducedMotion
 	client.SetEffectRate(cfg.EffectFPS)
-	if lg, lgErr := inhibit.NewLogind(); lgErr == nil {
-		defer lg.Release()
-		caller := power.NewCaller(lg)
-		executor.Caller = caller
-		go func() {
-			avail := power.Check(caller)
-			client.Post(func() {
-				menu = power.New(cfg.PowerActions, avail, sessionID)
-				client.Repaint()
-			})
-		}()
-	}
 	client.EnableBackground(cfg.Effect, cfg.Palette, cfg.ReducedMotion)
 	client.EnableWallpaper(os.Getenv("SYSC_LOCK_WALLPAPER"))
 
@@ -215,6 +203,23 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	}
 	amb := startAmbient()
 	defer amb.stop()
+	stopLogind := make(chan struct{})
+	defer close(stopLogind)
+	go func() {
+		lg, err := inhibit.NewLogind()
+		if err != nil {
+			return
+		}
+		defer lg.Release()
+		caller := power.NewCaller(lg)
+		avail := power.Check(caller)
+		client.Post(func() {
+			executor.Caller = caller
+			menu = power.New(cfg.PowerActions, avail, sessionID)
+			client.Repaint()
+		})
+		<-stopLogind
+	}()
 	if err := client.Run(); err != nil {
 
 		fmt.Fprintln(os.Stderr, "sysc-lock: connection lost:", err)

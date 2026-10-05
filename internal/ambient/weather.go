@@ -13,7 +13,7 @@ import (
 
 const (
 	openMeteoURL    = "https://api.open-meteo.com/v1/forecast"
-	weatherTimeout  = 6 * time.Second
+	weatherTimeout  = 2 * time.Second
 	weatherMaxBody  = 64 << 10
 	weatherCacheTTL = 15 * time.Minute
 )
@@ -44,7 +44,7 @@ func ParseWeatherConfig(data []byte) (lat, lon float64, unit string, ok bool) {
 }
 
 // FetchTemp reads the current temperature from an Open-Meteo-compatible
-// endpoint. The whole exchange is capped at 6 seconds and 64 KiB.
+// endpoint. The whole exchange is capped at 2 seconds and 64 KiB.
 func FetchTemp(base string, lat, lon float64, unit string) (float64, error) {
 	url := fmt.Sprintf("%s?latitude=%f&longitude=%f&current=temperature_2m", base, lat, lon)
 	if strings.EqualFold(unit, "fahrenheit") {
@@ -88,16 +88,18 @@ type Weather struct {
 }
 
 // Get returns the cached temperature when fresh, otherwise fetches. A failed
-// refetch serves the stale cache rather than nothing.
+// fetch omits weather; a recent failure is not retried until the cache TTL.
 func (w *Weather) Get(now time.Time) (float64, bool) {
-	if w.ok && now.Sub(w.fetchedAt) < weatherCacheTTL {
-		return w.temp, true
-	}
-	temp, err := FetchTemp(w.base, w.lat, w.lon, w.unit)
-	if err != nil {
+	if !w.fetchedAt.IsZero() && now.Sub(w.fetchedAt) < weatherCacheTTL {
 		return w.temp, w.ok
 	}
-	w.temp, w.fetchedAt, w.ok = temp, now, true
+	temp, err := FetchTemp(w.base, w.lat, w.lon, w.unit)
+	w.fetchedAt = now
+	if err != nil {
+		w.ok = false
+		return 0, false
+	}
+	w.temp, w.ok = temp, true
 	return temp, true
 }
 
