@@ -55,7 +55,7 @@ func TestOfflineViewSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 10, 5, 21, 47, 0, 0, time.UTC)
-	for _, name := range []string{"normal", "busy", "error", "reduced-motion", "narrow"} {
+	for _, name := range []string{"hidden", "revealed", "busy", "error", "reduced-motion", "narrow"} {
 		t.Run(name, func(t *testing.T) {
 			w, h := 960, 720
 			if name == "narrow" {
@@ -64,7 +64,11 @@ func TestOfflineViewSnapshots(t *testing.T) {
 			fb := render.New(w, h)
 			v := NewView(theme.Default(), "Sample Account", "example")
 			v.Layout = "English (US)"
+			v.Reduced = true // stills show the final frame, not the print reveal
 			v.Entry = &input.Model{}
+			if name != "hidden" {
+				v.Reveal.Show(now)
+			}
 			if name == "busy" {
 				v.Busy = true
 				v.Entry.Append("fake password")
@@ -89,11 +93,7 @@ func TestOfflineViewSnapshots(t *testing.T) {
 				if _, err = r.Draw(fb.Pix, fb.Stride, nil); err != nil {
 					t.Fatal(err)
 				}
-				for i := 0; i < len(fb.Pix); i += 4 {
-					fb.Pix[i] /= 3
-					fb.Pix[i+1] /= 3
-					fb.Pix[i+2] /= 3
-				}
+				DimBackground(fb.Pix)
 				v.RenderForeground(fb, now)
 			}
 			f, err := os.Create(filepath.Join(dir, name+".png"))
@@ -111,7 +111,20 @@ func TestOfflineViewSnapshots(t *testing.T) {
 		})
 	}
 	evidence := fmt.Sprintf("Offline raster evidence only; no lock/PAM/session qualification.\nShared renderer: github.com/Nomadcxx/sysc-terminal v0.0.0-20261004174459-4e522749ac8b, rain/nord, 20 steps.\nFake account: Sample Account. Fixed UTC clock: 2026-10-05 21:47.\n960x720 and compact 320x240, scale 1. Reduced-motion sample uses the approved solid fallback.\nOpaque foreground role WCAG luminance ratios against panel #10141c:\ntext #f0f4fa %.2f:1 (minimum 4.5)\nstatus #ffb4b4 %.2f:1 (minimum 4.5)\ncontrol/focus #93c5fd %.2f:1 (minimum 3)\nGlyph edge antialiasing is excluded from WCAG role contrast.\n", panelContrast(panelInk), panelContrast(panelDanger), panelContrast(panelAccent))
+	worst := color.NRGBA{R: 127, G: 127, B: 127, A: 255}
+	artRatio := (max(luminance(panelInk), luminance(worst)) + .05) / (min(luminance(panelInk), luminance(worst)) + .05)
+	evidence += fmt.Sprintf("Clock-forward composition, 12-hour clock. Art ink over the brightest dimmed effect pixel (white halved): %.2f:1 (minimum 3).\n", artRatio)
 	if err := os.WriteFile(filepath.Join(dir, "offline-render-evidence.txt"), []byte(evidence), 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestArtInkReadsOverTheBrightestDimmedEffect(t *testing.T) {
+	// Clock, date and wordmark sit on the dimmed effect without a backing; the
+	// brightest dimmed pixel is white halved.
+	worst := color.NRGBA{R: 127, G: 127, B: 127, A: 255}
+	a, b := luminance(panelInk), luminance(worst)
+	if ratio := (max(a, b) + .05) / (min(a, b) + .05); ratio < 3 {
+		t.Fatalf("art ink %.2f:1 below the 3:1 large-text floor", ratio)
 	}
 }

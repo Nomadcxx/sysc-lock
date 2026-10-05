@@ -5,16 +5,18 @@ import (
 	"image/color"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/Nomadcxx/sysc-lock/internal/art"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
 )
 
-// View composes the lock screen: static background (wallpaper file or palette
-// surface color), centered clock, user@host, masked entry, status line with
-// DMS-parity 4s auto-clear, attempts count, keyboard layout label.
+// View composes the lock screen over the background: wordmark, block-digit
+// clock, date, and an entry that appears when a key reveals it. Errors keep the
+// 4s auto-clear; terminal PAM errors persist.
 type View struct {
 	Pal        theme.Palette
 	User, Host string
@@ -26,14 +28,20 @@ type View struct {
 	Scale      float64
 	TextScale  float64
 	Entry      *input.Model
+	Reveal     input.Reveal
+	StyleName  string // clock style; unknown names fall back in art.Pick
+	Clock24    bool
+	Reduced    bool // no print reveal and no jolt
 
-	errMsg   string
-	errUntil time.Time
-	errTerm  bool
+	errMsg     string
+	errUntil   time.Time
+	errTerm    bool
+	printStart time.Time
+	joltStart  time.Time
 }
 
 func NewView(pal theme.Palette, user, host string) *View {
-	return &View{Pal: pal, User: user, Host: host, TextScale: 1}
+	return &View{Pal: pal, User: user, Host: host, TextScale: 1, StyleName: art.DefaultStyle}
 }
 
 func (v *View) SetError(msg string, now time.Time) {
@@ -46,6 +54,22 @@ func (v *View) SetErrorTerminal(msg string, _ time.Time) {
 }
 
 func (v *View) NoteAttempt(now time.Time) { v.Attempts++ }
+
+// Reject records an ordinary failed attempt: the message, the count and, unless
+// motion is reduced, the entry jolt.
+func (v *View) Reject(msg string, now time.Time) {
+	v.SetError(msg, now)
+	v.NoteAttempt(now)
+	if !v.Reduced {
+		v.joltStart = now
+	}
+}
+
+// EntryVisible reports whether the entry is shown at now. Text in the field or
+// a running verification keeps it up.
+func (v *View) EntryVisible(now time.Time) bool {
+	return v.Reveal.Tick(now, v.Busy || (v.Entry != nil && len(v.Entry.Pass) > 0))
+}
 
 // StatusLine is the visible error text at now (empty after the 4s window).
 func (v *View) StatusLine(now time.Time) string {
@@ -61,65 +85,52 @@ func (v *View) StatusLine(now time.Time) string {
 	return v.errMsg
 }
 
-// Render paints one full frame into fb at pixel size (fb dims). now drives the
-// clock (minute resolution) and error auto-clear.
-type PanelLayout struct {
-	Panel, Entry, Unlock                             image.Rectangle
-	ArtY, ClockY, DateY, UserY, IndicatorsY, StatusY int
-	Scale                                            float64
-	Compact                                          bool
+func (v *View) clockText(now time.Time) string {
+	if v.Clock24 {
+		return now.Format("15:04:05")
+	}
+	return now.Format("3:04:05 PM")
 }
 
-func PanelGeometry(width, height int, scale float64) PanelLayout {
-	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
-		scale = 1
-	}
-	scale = min(scale, 4)
-	w, h := int(float64(width)/scale), int(float64(height)/scale)
-	compact := h < 480
-	panelW := min(420, max(1, w-32))
-	panelH := 420
-	if compact {
-		panelH = 206
-	}
-	panelH = min(panelH, max(1, h-16))
-	x, y := (w-panelW)/2, (h-panelH)/2
-	p := PanelLayout{Scale: scale, Compact: compact}
-	rect := func(x, y, w, h int) image.Rectangle {
-		return image.Rect(int(float64(x)*scale), int(float64(y)*scale), int(float64(x+w)*scale), int(float64(y+h)*scale))
-	}
-	line := func(n int) int { return int(float64(y+n) * scale) }
-	p.Panel = rect(x, y, panelW, panelH)
-	if compact {
-		p.ClockY = line(30)
-		p.DateY = line(48)
-		p.UserY = line(72)
-		p.Entry = rect(x+12, y+80, max(1, panelW-24), 32)
-		p.Unlock = rect(x+12, y+120, max(1, panelW-24), 32)
-		p.IndicatorsY = line(174)
-		p.StatusY = line(196)
-	} else {
-		p.ArtY = line(64)
-		p.ClockY = line(120)
-		p.DateY = line(152)
-		p.UserY = line(196)
-		p.Entry = rect(x+20, y+220, max(1, panelW-40), 48)
-		p.Unlock = rect(x+20, y+284, max(1, panelW-40), 44)
-		p.IndicatorsY = line(360)
-		p.StatusY = line(394)
-	}
-	return p
-}
+// NextDeadline is the next time the foreground must repaint without input:
+// the next second, an error expiry, the entry hiding, and frequent steps while
+// the print reveal or the jolt is running.
 func (v *View) NextDeadline(now time.Time) time.Time {
-	next := now.Truncate(time.Minute).Add(time.Minute)
-	if !v.errTerm && v.errMsg != "" && v.errUntil.After(now) && v.errUntil.Before(next) {
-		next = v.errUntil
+	next := now.Truncate(time.Second).Add(time.Second)
+	consider := func(t time.Time) {
+		if t.After(now) && t.Before(next) {
+			next = t
+		}
+	}
+	if !v.errTerm && v.errMsg != "" {
+		consider(v.errUntil)
+	}
+	consider(v.Reveal.Deadline())
+	if !v.Reduced {
+		if !v.printStart.IsZero() && now.Sub(v.printStart) < art.PrintDuration {
+			consider(now.Add(33 * time.Millisecond))
+		}
+		if !v.joltStart.IsZero() && now.Sub(v.joltStart) < art.JoltDuration {
+			consider(now.Add(40 * time.Millisecond))
+		}
 	}
 	return next
 }
+
+// Render paints one full frame into fb over the opaque surface colour.
 func (v *View) Render(fb *render.Framebuffer, now time.Time) {
 	fb.Fill(v.Pal.Surface)
 	v.RenderForeground(fb, now)
+}
+
+// DimBackground halves red, green and blue so the art ink keeps 3:1 contrast
+// over the brightest effect pixel. Alpha is untouched.
+func DimBackground(pix []byte) {
+	for i := 0; i+3 < len(pix); i += 4 {
+		pix[i] /= 2
+		pix[i+1] /= 2
+		pix[i+2] /= 2
+	}
 }
 
 func fillRect(fb *render.Framebuffer, r image.Rectangle, c color.NRGBA) {
@@ -136,79 +147,93 @@ func border(fb *render.Framebuffer, r image.Rectangle, c color.NRGBA, n int) {
 	fillRect(fb, image.Rect(r.Min.X, r.Min.Y, r.Min.X+n, r.Max.Y), c)
 	fillRect(fb, image.Rect(r.Max.X-n, r.Min.Y, r.Max.X, r.Max.Y), c)
 }
+
+// printLimits reports how many wordmark and clock cells the print reveal has
+// drawn at now (-1: all). done is true once the reveal has finished or motion
+// is reduced; the date appears then.
+func (v *View) printLimits(now time.Time, s Scene) (word, clock int, done bool) {
+	if v.Reduced || now.Sub(v.printStart) >= art.PrintDuration {
+		return -1, -1, true
+	}
+	wt := art.Total(s.Wordmark)
+	n := art.PrintLimit(now.Sub(v.printStart), wt+art.Total(s.Clock))
+	return min(n, wt), max(0, n-wt), false
+}
+
+func (v *View) textPx(n int, box image.Rectangle) int {
+	t := v.TextScale
+	if t <= 0 || math.IsNaN(t) || math.IsInf(t, 0) {
+		t = 1
+	}
+	t = max(.75, min(2, t))
+	return max(1, min(int(float64(n)*t), max(1, box.Dy()*84/100)))
+}
+
 func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
-	p := PanelGeometry(fb.Width, fb.Height, v.Scale)
-	// Fixed dark panel roles retain readable contrast over every effect palette.
-	fillRect(fb, p.Panel, panelGround)
-	border(fb, p.Panel, panelAccent, max(1, int(p.Scale)))
-	border(fb, p.Panel.Inset(max(3, int(4*p.Scale))), panelAccent, 1)
-	px := func(n int) int { return max(1, int(float64(n)*p.Scale)) }
-	textScale := v.TextScale
-	if textScale <= 0 || math.IsNaN(textScale) || math.IsInf(textScale, 0) {
-		textScale = 1
+	if v.printStart.IsZero() {
+		v.printStart = now // the first foreground frame starts the print reveal
 	}
-	textScale = max(.75, min(2, textScale))
-	text := func(baseline int, s string, size, top, bottom int, box image.Rectangle, col color.NRGBA) {
-		box = box.Intersect(image.Rect(p.Panel.Min.X+px(12), top, p.Panel.Max.X-px(12), bottom))
-		size = min(int(float64(px(size))*textScale), max(1, int(float64(box.Dy())*.84)))
-		f := face(size)
-		ascent := f.Metrics().Ascent.Ceil()
-		descent := f.Metrics().Descent.Ceil()
-		baseline = max(box.Min.Y+ascent, min(baseline, box.Max.Y-descent))
-		drawTextBox(fb, box, baseline, s, size, col)
+	text := v.clockText(now)
+	s := Layout(fb.Width, fb.Height, v.Scale, v.StyleName, text)
+	wordLimit, clockLimit, done := v.printLimits(now, s)
+	for _, r := range art.Rects(s.Wordmark, s.WordAt, s.WordCW, 2*s.WordCW, wordLimit) {
+		fillRect(fb, r, panelInk)
 	}
-	label := func(y int, s string, size, height int, col color.NRGBA) {
-		text(y, s, size, y-px(height), y+px(4), p.Panel, col)
-	}
-	if !p.Compact {
-		label(p.ArtY, "SYSC", 38, 52, panelAccent)
-	}
-	clockSize := 42
-	if p.Compact {
-		clockSize = 24
-	}
-	clockTop := p.ArtY + px(8)
-	if p.Compact {
-		clockTop = p.Panel.Min.Y + px(4)
-	}
-	text(p.ClockY, now.Format("15:04"), clockSize, clockTop, p.DateY-px(8), p.Panel, panelInk)
-	text(p.DateY, now.Format("Monday, 2 January"), 12, p.ClockY+px(6), p.UserY-px(8), p.Panel, panelInk)
-	text(p.UserY, "/ "+v.User+" /", 18, p.DateY+px(6), p.Entry.Min.Y-px(2), p.Panel, panelInk)
-	border(fb, p.Entry, panelAccent, max(2, px(2)))
-	mask := "Password"
-	if v.Entry != nil && len(v.Entry.Pass) > 0 {
-		// ponytail: show the trailing 24 mask glyphs; the complete credential stays in the owner.
-		dots := v.Entry.Mask()
-		runes := []rune(dots)
-		mask = string(runes[max(0, len(runes)-24):])
-	}
-	text(p.Entry.Min.Y+p.Entry.Dy()/2+px(7), mask, 22, p.Entry.Min.Y+px(3), p.Entry.Max.Y-px(3), p.Entry.Inset(px(8)), panelInk)
-	border(fb, p.Unlock, panelAccent, max(1, px(1)))
-	button := "Unlock →"
-	if v.Busy {
-		button = "Checking…"
-	}
-	text(p.Unlock.Min.Y+p.Unlock.Dy()/2+px(6), button, 18, p.Unlock.Min.Y+px(3), p.Unlock.Max.Y-px(3), p.Unlock.Inset(px(8)), panelInk)
-	indicator := v.Layout
-	if v.Caps {
-		if indicator != "" {
-			indicator += " · "
+	if s.ClockCW > 0 {
+		for _, r := range art.Rects(s.Clock, s.ClockBox.Min, s.ClockCW, 2*s.ClockCW, clockLimit) {
+			fillRect(fb, r, panelInk)
 		}
-		indicator += "Caps Lock"
+	} else if clockLimit != 0 {
+		size := max(1, s.ClockBox.Dy()*7/10)
+		drawTextBox(fb, s.ClockBox, s.ClockBox.Min.Y+s.ClockBox.Dy()*4/5, text, size, panelInk)
+	}
+	if done {
+		drawTextBox(fb, s.Date, s.Date.Min.Y+s.DateSize, strings.ToUpper(now.Format("Monday, January 2")), v.textPx(s.DateSize, s.Date), panelInk)
+	}
+	visible := v.EntryVisible(now)
+	status := v.StatusLine(now)
+	if !visible && status == "" {
+		return
+	}
+	dx := art.Jolt(now.Sub(v.joltStart)) * s.Cell
+	shift := func(r image.Rectangle) image.Rectangle { return r.Add(image.Pt(dx, 0)) }
+	fillRect(fb, shift(s.Backing), panelGround)
+	if visible {
+		v.drawEntry(fb, shift(s.Entry), shift(s.Indicators), s.Scale)
+	}
+	ink := panelDanger
+	if v.Busy {
+		ink = panelInk
+	}
+	line := shift(s.Status)
+	drawTextBox(fb, line, line.Min.Y+line.Dy()*3/4, status, v.textPx(line.Dy()*3/5, line), ink)
+}
+
+func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectangle, scale float64) {
+	border(fb, entry, panelAccent, max(2, int(2*scale)))
+	inner := entry.Inset(max(2, int(8*scale)))
+	if v.Entry == nil || len(v.Entry.Pass) == 0 {
+		drawTextBox(fb, inner, entry.Min.Y+entry.Dy()*2/3, "PASSWORD", v.textPx(entry.Dy()/2, inner), panelInk)
+	} else {
+		sq := max(2, entry.Dy()/4)
+		step := sq * 3 / 2
+		n := min(len(v.Entry.Pass), max(1, inner.Dx()/step))
+		y := entry.Min.Y + (entry.Dy()-sq)/2
+		for i := 0; i < n; i++ {
+			fillRect(fb, image.Rect(inner.Min.X+i*step, y, inner.Min.X+i*step+sq, y+sq), panelInk)
+		}
+	}
+	parts := []string{v.User}
+	if v.Layout != "" {
+		parts = append(parts, v.Layout)
+	}
+	if v.Caps {
+		parts = append(parts, "Caps Lock")
 	}
 	if v.Num {
-		if indicator != "" {
-			indicator += " · "
-		}
-		indicator += "Num Lock"
+		parts = append(parts, "Num Lock")
 	}
-	text(p.IndicatorsY, indicator, 12, p.Unlock.Max.Y+px(6), p.StatusY-px(18), p.Panel, panelInk)
-	status := v.StatusLine(now)
-	statusInk := panelDanger
-	if v.Busy {
-		statusInk = panelInk
-	}
-	text(p.StatusY, status, 14, p.IndicatorsY+px(5), p.Panel.Max.Y-px(6), p.Panel, statusInk)
+	drawTextBox(fb, indicators, indicators.Min.Y+indicators.Dy()*3/4, strings.Join(parts, " · "), v.textPx(indicators.Dy()*3/5, indicators), panelInk)
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
@@ -216,6 +241,7 @@ func itoa(n int) string { return strconv.Itoa(n) }
 func (v *View) Terminal() bool { return v.errTerm }
 
 // Fixed opaque roles maintain contrast independently of decoration palettes.
+// The entry and status sit on panelGround; the art sits on the dimmed effect.
 var (
 	panelGround = color.NRGBA{R: 16, G: 20, B: 28, A: 255}
 	panelInk    = color.NRGBA{R: 240, G: 244, B: 250, A: 255}
