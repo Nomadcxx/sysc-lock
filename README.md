@@ -1,8 +1,13 @@
-# sysc-lock
 
-A Wayland session locker built on `ext-session-lock-v1` (compositor-enforced input
-seal), in pure Go + CGO only via `msteinert/pam/v2` for in-process PAM.
-The managed owner supports Niri / sysc-shell.
+![sysc-lock](assets/wordmark.png)
+
+A Wayland session locker for sysc-shell, with compositor-enforced locking and in-process
+PAM authentication. It supports Niri and sysc-shell.
+
+## Quick Links
+
+- [Usage](#usage)
+- [The sysc ecosystem](https://github.com/Nomadcxx/sysc-shell/blob/main/docs/ecosystem.md)
 
 ## Security model
 
@@ -83,3 +88,56 @@ Collect compositor events, commit cadence and input latency alongside these
 samples. The script does not activate the service or perform locking/sleep.
 The implementation plan lists the production PAM, recovery, sleep and output
 gates; offline snapshots and local checks do not qualify them.
+
+## Ecosystem
+
+```mermaid
+flowchart LR
+    greet["sysc-greet<br/>graphical greeter"] -->|starts configured session| shell["sysc-shell<br/>desktop shell"]
+
+    subgraph session["Session"]
+        lock["sysc-lock<br/>session locker"]
+    end
+
+    subgraph daemons["Companion daemons"]
+        notify["sysc-notify<br/>notifications"]
+        clipboard["sysc-clipboard<br/>clipboard history"]
+        tray["sysc-tray<br/>system tray"]
+    end
+
+    subgraph wallpaper["Wallpaper and idle"]
+        gslapper["gSlapper<br/>video wallpaper"]
+        terminal["sysc-terminal<br/>terminal effects"]
+        walls["sysc-walls<br/>idle screensaver"]
+    end
+
+    subgraph libs["Shared Go libraries"]
+        wayland["sysc-wayland<br/>Wayland transport"]
+        launch["sysc-launch<br/>app launcher"]
+        metrics["sysc-metrics<br/>system telemetry"]
+    end
+
+    plugins["sysc-plugins<br/>plugin source"]
+
+    shell -->|spawns| session
+    shell -->|connects to| daemons
+    shell -->|drives| wallpaper
+    shell -->|links| libs
+    shell -->|installs from| plugins
+
+    classDef current fill:#7aa2f7,stroke:#1a1b26,color:#1a1b26,stroke-width:2px
+    class lock current
+```
+
+[The sysc ecosystem](https://github.com/Nomadcxx/sysc-shell/blob/main/docs/ecosystem.md) explains
+each connection, socket and version pin.
+
+## Documentation
+
+- [The sysc ecosystem](https://github.com/Nomadcxx/sysc-shell/blob/main/docs/ecosystem.md)
+- [sysc-shell](https://github.com/Nomadcxx/sysc-shell) — the shell that spawns and tracks the locker
+
+---
+
+<a href="https://github.com/Nomadcxx"><img src="https://raw.githubusercontent.com/Nomadcxx/Nomadcxx/main/assets/rama-mark.svg" height="22" alt="RAMA"></a> — terminal-native tooling for the linux desktop.
+[More projects →](https://github.com/Nomadcxx) · [Sponsor](https://github.com/sponsors/Nomadcxx) ❤️
