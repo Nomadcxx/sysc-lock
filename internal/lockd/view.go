@@ -33,9 +33,12 @@ type View struct {
 	Clock24    bool
 	Reduced    bool // no print reveal and no jolt
 	// Power is nil when no action is available. Hint is the strip text,
-	// handed in by the owner so this package does not import power.
-	Power *PowerView
-	Hint  string
+	// handed in by the owner so this package does not import power. Ambient
+	// is the one-line status text the owner reads from the collector's
+	// snapshot file; it draws only while the entry is visible.
+	Power   *PowerView
+	Hint    string
+	Ambient string
 	// Powering is the status shown once an action is under way. While it is
 	// set, keys are ignored.
 	Powering string
@@ -222,6 +225,7 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	line := shift(s.Status)
 	drawTextBox(fb, line, line.Min.Y+line.Dy()*3/4, status, v.textPx(line.Dy()*3/5, line), ink)
 	if visible {
+		v.drawAmbient(fb, s)
 		v.drawHint(fb, s)
 	}
 	if v.Power != nil && v.Power.Open {
@@ -266,6 +270,15 @@ func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
 	}
 	box := s.Help.Inset(max(1, s.Help.Dy()/6))
 	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Hint, v.textPx(14, box), panelMuted)
+}
+
+func (v *View) drawAmbient(fb *render.Framebuffer, s Scene) {
+	if s.Ambient.Empty() || v.Ambient == "" {
+		return
+	}
+	fillRect(fb, s.Ambient, panelGround)
+	box := s.Ambient.Inset(max(1, s.Ambient.Dy()/6))
+	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Ambient, v.textPx(14, box), panelMuted)
 }
 
 func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p PowerView) {

@@ -291,6 +291,7 @@ func TestSceneStaysInsideItsBounds(t *testing.T) {
 		v.Entry.Append(strings.Repeat("a", 200))
 		v.Reveal.Show(now)
 		v.Hint = "F4 Power • Enter Unlock"
+		v.Ambient = strings.Repeat("82% · Wi-Fi · playing · 18° · ", 10)
 		v.Power = &PowerView{
 			Open: true, Title: "Power Options", Progress: 40, Help: "help",
 			Rows: []PowerRow{{Title: "Log out"}, {Title: "Reboot", Selected: true}, {Title: "Cancel"}},
@@ -306,6 +307,41 @@ func TestSceneStaysInsideItsBounds(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestHiddenEntryPaintsNoAmbientInk(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	v := NewView(theme.Default(), "u", "h")
+	v.Reduced = true
+	v.Ambient = "82% · Wi-Fi · playing · 18°"
+	fb := render.New(960, 720)
+	v.Render(fb, now)
+	s := Layout(960, 720, 1, "", v.clockText(now))
+	if s.Ambient.Empty() {
+		t.Skip("no ambient slot")
+	}
+	got := color.NRGBAModel.Convert(fb.At(s.Ambient.Min.X+1, s.Ambient.Min.Y+1)).(color.NRGBA)
+	if got != v.Pal.Surface {
+		t.Fatal("hidden entry must leave ambient undrawn")
+	}
+}
+
+func TestRevealedAmbientSitsOnGroundInMutedInk(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	v := NewView(theme.Default(), "u", "h")
+	v.Reduced = true
+	v.Reveal.Show(now)
+	v.Ambient = "82% · Wi-Fi"
+	fb := render.New(960, 720)
+	v.Render(fb, now)
+	s := Layout(960, 720, 1, "", v.clockText(now))
+	if s.Ambient.Empty() {
+		t.Skip("no ambient slot")
+	}
+	got := color.NRGBAModel.Convert(fb.At(s.Ambient.Min.X+1, s.Ambient.Min.Y+1)).(color.NRGBA)
+	if got != panelGround {
+		t.Fatal("ambient needs a solid backing")
 	}
 }
 
