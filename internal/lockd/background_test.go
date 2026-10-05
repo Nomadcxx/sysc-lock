@@ -10,12 +10,12 @@ import (
 	"time"
 )
 
-func TestTypingAndPamFreezeEffect(t *testing.T) {
+func TestPamVerificationFreezesEffect(t *testing.T) {
 	c := &Client{}
 	now := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
 	c.SetMotionFrozen(true, now)
 	if c.motionAllowed(now.Add(time.Hour)) {
-		t.Fatal("typing/busy effect ticks")
+		t.Fatal("effect ticked during verification")
 	}
 	c.SetMotionFrozen(false, now)
 	if c.motionAllowed(now.Add(time.Second)) {

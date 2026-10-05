@@ -95,7 +95,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			view.Busy = true
 			go authenticate(authenticator, model.Password(), client, view, model, gate, gate.generation)
 		}
-		client.SetMotionFrozen(gate.busy || len(model.Pass) > 0, time.Now())
+		client.SetMotionFrozen(gate.busy, time.Now())
 		client.Repaint()
 	}, func(fb *render.Framebuffer, scale float64, background []byte) error {
 		view.Scale = scale
