@@ -30,15 +30,17 @@ type Scene struct {
 	// bottom hint strip. Both are laid out whether or not they are drawn, so
 	// opening the popup never moves anything. Menu is empty only when the
 	// output is too small for it; Help is dropped, like the wordmark, when the
-	// stack would not fit.
-	Menu image.Rectangle
-	Help image.Rectangle
+	// stack would not fit. Ambient is the one-line status row under Status; it
+	// drops first when the stack would not fit, then Help, then the wordmark.
+	Menu    image.Rectangle
+	Help    image.Rectangle
+	Ambient image.Rectangle
 }
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
 	wm := image.Rectangle{Min: s.WordAt, Max: s.WordAt.Add(image.Pt(art.Width(s.Wordmark)*s.WordCW, len(s.Wordmark)*2*s.WordCW))}
-	return wm.Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help)
+	return wm.Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
@@ -73,12 +75,16 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	lineH := px(22)
 	margin := px(8)
 	helpH := lineH + unit // gap above the strip plus the strip itself
+	ambientH := lineH
 	total := func() int {
-		t := clockH + gap + dateH + 2*gap + entryH + 2*lineH + helpH
+		t := clockH + gap + dateH + 2*gap + entryH + 2*lineH + ambientH + helpH
 		if wmH > 0 {
 			t += wmH + gap
 		}
 		return t
+	}
+	if total() > height-2*margin && ambientH > 0 {
+		ambientH = 0 // the ambient row drops before anything else
 	}
 	if total() > height-2*margin && helpH > 0 {
 		helpH = 0 // greet chrome drops before the wordmark
@@ -104,8 +110,11 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	s.Indicators = image.Rect(x, y, x+entryW, y+lineH)
 	s.Status = image.Rect(x, y+lineH, x+entryW, y+2*lineH)
 	s.Backing = image.Rect(x, s.Entry.Min.Y, x+entryW, s.Status.Max.Y).Inset(-px(6))
+	if ambientH > 0 {
+		s.Ambient = image.Rect(x, y+2*lineH, x+entryW, y+3*lineH)
+	}
 	if helpH > 0 {
-		y += 2*lineH + unit
+		y += 2*lineH + ambientH + unit
 		s.Help = image.Rect(x, y, x+entryW, y+lineH)
 	}
 	menuW := min(max(px(320), entryW), max(1, width-2*margin))

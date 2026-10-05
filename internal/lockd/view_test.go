@@ -109,7 +109,7 @@ func TestSceneFitsEverySize(t *testing.T) {
 			fb := image.Rect(0, 0, c.w, c.h)
 			for name, r := range map[string]image.Rectangle{
 				"clock": s.ClockBox, "date": s.Date, "entry": s.Entry,
-				"backing": s.Backing, "status": s.Status,
+				"backing": s.Backing, "status": s.Status, "ambient": s.Ambient,
 				"menu": s.Menu, "help": s.Help,
 			} {
 				if r.Empty() {
@@ -126,10 +126,30 @@ func TestSceneFitsEverySize(t *testing.T) {
 			if !(s.ClockBox.Max.Y <= s.Date.Min.Y && s.Date.Max.Y <= s.Entry.Min.Y) {
 				t.Fatalf("%dx%d %s: stack overlaps %+v", c.w, c.h, style, s)
 			}
+			if !s.Ambient.Empty() && s.Ambient.Min.Y < s.Status.Max.Y {
+				t.Fatalf("%dx%d %s: ambient overlaps status", c.w, c.h, style)
+			}
+			if !s.Ambient.Empty() && !s.Help.Empty() && s.Ambient.Max.Y > s.Help.Min.Y {
+				t.Fatalf("%dx%d %s: ambient overlaps help", c.w, c.h, style)
+			}
 			if s.Help.Empty() && c.h > 240 {
 				t.Fatalf("%dx%d %s: the help strip must fit above 240 rows", c.w, c.h, style)
 			}
 		}
+	}
+}
+
+func TestAmbientDropsBeforeHelp(t *testing.T) {
+	s := Layout(320, 240, 1, "kompaktblk", widestClock)
+	if !s.Ambient.Empty() && s.Help.Empty() {
+		t.Fatal("ambient must drop before help")
+	}
+	wide := Layout(960, 720, 1, "kompaktblk", widestClock)
+	if wide.Ambient.Empty() {
+		t.Fatal("ambient must fit at 960x720")
+	}
+	if !wide.Ambient.In(image.Rect(0, 0, 960, 720)) {
+		t.Fatal("ambient outside output")
 	}
 }
 
