@@ -107,7 +107,14 @@ func TestSceneFitsEverySize(t *testing.T) {
 		for _, style := range []string{"kompaktblk", "phm_blocky_reverse", "plain"} {
 			s := Layout(c.w, c.h, c.scale, style, widestClock)
 			fb := image.Rect(0, 0, c.w, c.h)
-			for name, r := range map[string]image.Rectangle{"clock": s.ClockBox, "date": s.Date, "entry": s.Entry, "backing": s.Backing, "status": s.Status} {
+			for name, r := range map[string]image.Rectangle{
+				"clock": s.ClockBox, "date": s.Date, "entry": s.Entry,
+				"backing": s.Backing, "status": s.Status,
+				"menu": s.Menu, "help": s.Help,
+			} {
+				if r.Empty() {
+					continue // a dropped row, like the wordmark
+				}
 				if !r.In(fb) {
 					t.Fatalf("%dx%d %s: %s %v outside output", c.w, c.h, style, name, r)
 				}
@@ -118,6 +125,9 @@ func TestSceneFitsEverySize(t *testing.T) {
 			}
 			if !(s.ClockBox.Max.Y <= s.Date.Min.Y && s.Date.Max.Y <= s.Entry.Min.Y) {
 				t.Fatalf("%dx%d %s: stack overlaps %+v", c.w, c.h, style, s)
+			}
+			if s.Help.Empty() && c.h > 240 {
+				t.Fatalf("%dx%d %s: the help strip must fit above 240 rows", c.w, c.h, style)
 			}
 		}
 	}

@@ -26,12 +26,19 @@ type Scene struct {
 	// so revealing it never moves anything.
 	Entry, Indicators, Status image.Rectangle
 	Backing                   image.Rectangle
+	// Menu is the Power Options popup, centred over the stack, and Help is the
+	// bottom hint strip. Both are laid out whether or not they are drawn, so
+	// opening the popup never moves anything. Menu is empty only when the
+	// output is too small for it; Help is dropped, like the wordmark, when the
+	// stack would not fit.
+	Menu image.Rectangle
+	Help image.Rectangle
 }
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
 	wm := image.Rectangle{Min: s.WordAt, Max: s.WordAt.Add(image.Pt(art.Width(s.Wordmark)*s.WordCW, len(s.Wordmark)*2*s.WordCW))}
-	return wm.Union(s.ClockBox).Union(s.Date).Union(s.Backing)
+	return wm.Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
@@ -65,12 +72,16 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	entryH := max(px(40), unit*3)
 	lineH := px(22)
 	margin := px(8)
+	helpH := lineH + unit // gap above the strip plus the strip itself
 	total := func() int {
-		t := clockH + gap + dateH + 2*gap + entryH + 2*lineH
+		t := clockH + gap + dateH + 2*gap + entryH + 2*lineH + helpH
 		if wmH > 0 {
 			t += wmH + gap
 		}
 		return t
+	}
+	if total() > height-2*margin && helpH > 0 {
+		helpH = 0 // greet chrome drops before the wordmark
 	}
 	if total() > height-2*margin && wmH > 0 {
 		wm, wmH, wcw = nil, 0, 0
@@ -93,5 +104,14 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	s.Indicators = image.Rect(x, y, x+entryW, y+lineH)
 	s.Status = image.Rect(x, y+lineH, x+entryW, y+2*lineH)
 	s.Backing = image.Rect(x, s.Entry.Min.Y, x+entryW, s.Status.Max.Y).Inset(-px(6))
+	if helpH > 0 {
+		y += 2*lineH + unit
+		s.Help = image.Rect(x, y, x+entryW, y+lineH)
+	}
+	menuW := min(max(px(320), entryW), max(1, width-2*margin))
+	menuH := min(px(180), max(1, height-2*margin))
+	mx := (width - menuW) / 2
+	my := min(s.Entry.Min.Y-(menuH-entryH)/2, height-margin-menuH)
+	s.Menu = image.Rect(mx, max(margin, my), mx+menuW, max(margin, my)+menuH)
 	return s
 }
