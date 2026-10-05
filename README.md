@@ -37,7 +37,12 @@ Requires libpam headers (`pam_apl.h`) because of the cgo PAM binding.
 
     sysc-lock                    # requests the registered session owner and waits
     sysc-lock --session          # persistent owner, started by the user unit
+    sysc-lock --ambient          # collector child; the owner starts it, not users
     sysc-lock --version
+
+While the password entry is revealed, the owner may show one ambient row
+(battery, link, playing, temperature) read from the collector's snapshot file;
+it is a read-only hint, never an unlock path.
 
 The service requires Niri's startup environment: XDG_SESSION_ID, NIRI_SOCKET,
 WAYLAND_DISPLAY and XDG_RUNTIME_DIR. Registration verifies the real UID,
