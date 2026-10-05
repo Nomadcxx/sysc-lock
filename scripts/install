@@ -1,0 +1,19 @@
+#!/bin/sh
+# Installs files only. Session activation requires a coordinated Niri window.
+set -eu
+[ "$#" -eq 2 ] || { echo 'usage: install CANDIDATE PREFIX' >&2; exit 1; }
+candidate=$1
+prefix=$2
+[ -f "$candidate" ] && [ -x "$candidate" ] || { echo 'candidate must be an executable regular file' >&2; exit 1; }
+[ "$prefix" != / ] && [ -n "$prefix" ] || { echo 'use a user prefix' >&2; exit 1; }
+case "$prefix" in
+  /*) ;;
+  *) echo 'prefix must be absolute' >&2; exit 1 ;;
+esac
+# ponytail: unit prefixes use simple paths; quoted/specifier paths need a systemd path encoder.
+case "$prefix" in *[!a-zA-Z0-9_./-]*) echo 'prefix contains unsupported characters' >&2; exit 1 ;; esac
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+install -d -m 0755 "$prefix/bin" "$prefix/share/systemd/user"
+install -m 0755 "$candidate" "$prefix/bin/sysc-lock.new"
+mv -f "$prefix/bin/sysc-lock.new" "$prefix/bin/sysc-lock"
+sed "s|ExecStart=.*|ExecStart=$prefix/bin/sysc-lock --session|" "$root/contrib/systemd/sysc-lock-session.service" > "$prefix/share/systemd/user/sysc-lock-session.service"

@@ -58,31 +58,55 @@ func (p *PAM) Verify(user string, response PromptFunc) (Result, error) {
 	if _, err := os.Stat("/etc/pam.d/" + service); err != nil {
 		return Result{}, fmt.Errorf("auth: pam service %q unavailable: %w", service, err)
 	}
-	tx, err := pam.StartFunc(service, user, func(style pam.Style, msg string) (string, error) {
-		switch style {
-		case pam.PromptEchoOff:
-			return response(msg, false)
-		case pam.PromptEchoOn:
-			return response(msg, true)
-		case pam.ErrorMsg, pam.TextInfo:
-			// Surface non-prompt messages, never as secret.
-			return "", nil
-		default:
-			return "", fmt.Errorf("auth: unsupported prompt style %d", style)
-		}
-	})
+	var conversationErr error
+	tx, err := pam.StartFunc(service, user, pamConversation(response, &conversationErr))
 	if err != nil {
 		return Result{}, fmt.Errorf("auth: start: %w", err)
 	}
 	defer tx.End() //nolint:errcheck // end-of-transact is best-effort
 
-	if err := tx.Authenticate(0); err != nil {
-		return mapPamError(err), nil
+	return verifyTransaction(tx.Authenticate, tx.AcctMgmt, &conversationErr), nil
+}
+
+// verifyTransaction also checks the conversation outcome; modules own PAM stages.
+func verifyTransaction(authenticate, acctMgmt func(pam.Flags) error, conversationErr *error) Result {
+	for _, check := range []func(pam.Flags) error{authenticate, acctMgmt} {
+		err := check(0)
+		// PAM modules can ignore callback failures; they never authorize unlock.
+		if *conversationErr != nil {
+			return Result{Message: "Additional prompt unsupported"}
+		}
+		if err != nil {
+			return mapPamError(err)
+		}
 	}
-	if err := tx.AcctMgmt(0); err != nil {
-		return mapPamError(err), nil
+	return Result{OK: true}
+}
+
+func pamConversation(response PromptFunc, failure *error) pam.ConversationFunc {
+	prompted := false
+	return func(style pam.Style, msg string) (string, error) {
+		if *failure != nil {
+			return "", *failure
+		}
+		switch style {
+		case pam.PromptEchoOff:
+			if !prompted && response != nil {
+				prompted = true
+				answer, err := response(msg, false)
+				if err != nil {
+					*failure = err
+					return "", err
+				}
+				return answer, nil
+			}
+		case pam.ErrorMsg, pam.TextInfo:
+			// Raw module text can contain sensitive details; stage outcomes are sanitized.
+			return "", nil
+		}
+		*failure = errors.New("additional or unsupported authentication prompt")
+		return "", *failure
 	}
-	return Result{OK: true}, nil
 }
 
 func mapPamError(err error) Result {

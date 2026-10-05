@@ -1,0 +1,60 @@
+#!/bin/sh
+# Evidence collection only: does not lock, install, authenticate or suspend.
+set -eu
+usage() { echo 'usage: qualify offline CANDIDATE EVIDENCE_DIR --ack-local-checks | sample PID SECONDS EVIDENCE_DIR' >&2; exit 2; }
+[ "$#" -eq 4 ] || usage
+mode=$1
+case "$mode" in
+ offline)
+  candidate=$2
+  evidence=$3
+  [ "$4" = --ack-local-checks ] || usage
+  [ -f "$candidate" ] && [ -x "$candidate" ] || usage
+  mkdir -p "$evidence"
+  chmod 0700 "$evidence"
+  root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+  cd "$root"
+  git rev-parse HEAD > "$evidence/source-revision.txt"
+  git status --short > "$evidence/source-status.txt"
+  sha256sum "$candidate" > "$evidence/candidate.sha256"
+  go version -m "$candidate" > "$evidence/modules.txt"
+  GOMAXPROCS=2 timeout 90s go test -count=1 ./internal/input ./internal/auth ./internal/session ./internal/config ./internal/inhibit ./internal/lockd ./internal/render ./cmd/sysc-lock > "$evidence/checks.txt" 2>&1
+  GOMAXPROCS=2 timeout 90s go vet ./internal/input ./internal/auth ./internal/session ./internal/config ./internal/lockd ./internal/render ./internal/inhibit ./cmd/sysc-lock > "$evidence/vet.txt" 2>&1
+  git diff --check > "$evidence/diff-check.txt"
+  # Inspect matches locally; this scan is evidence, not a security certification.
+  rg -n -i 'bypass|skip.?auth|fake.?auth|auth.?stub|unlock.*(rpc|signal)|go:build' cmd internal --glob '*.go' --glob '!**/*_test.go' > "$evidence/auth-scan.txt" || [ "$?" -eq 1 ]
+  ;;
+ sample)
+  exec python3 - "$2" "$3" "$4" <<'PY'
+import csv, os, pathlib, sys, time
+pid, seconds, output = int(sys.argv[1]), int(sys.argv[2]), pathlib.Path(sys.argv[3])
+if pid <= 1 or not 1 <= seconds <= 600:
+    raise SystemExit('PID must exceed 1; seconds must be between 1 and 600')
+proc = pathlib.Path('/proc') / str(pid)
+if proc.stat().st_uid != os.getuid():
+    raise SystemExit('sample only the current UID')
+output.mkdir(parents=True, exist_ok=True)
+output.chmod(0o700)
+hz, pages = os.sysconf('SC_CLK_TCK'), os.sysconf('SC_PAGE_SIZE')
+def read():
+    fields = (proc / 'stat').read_text().rsplit(')', 1)[1].split()
+    return fields[19], int(fields[11]) + int(fields[12]), int(fields[21]) * pages, len(list((proc / 'fd').iterdir()))
+start, ticks, _, _ = read()
+previous = time.monotonic()
+with (output / ('process-%s.csv' % pid)).open('x', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerow(['elapsed_s', 'cpu_percent_one_core', 'rss_bytes', 'fd_count'])
+    begin = previous
+    for _ in range(seconds):
+        time.sleep(1)
+        current_start, current_ticks, rss, fds = read()
+        if current_start != start:
+            raise SystemExit('PID changed; sample rejected')
+        now = time.monotonic()
+        writer.writerow([round(now - begin, 3), round(100 * (current_ticks - ticks) / hz / (now - previous), 3), rss, fds])
+        file.flush()
+        ticks, previous = current_ticks, now
+PY
+  ;;
+ *) usage ;;
+esac

@@ -6,8 +6,10 @@ package theme
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"regexp"
+	"syscall"
 
 	"image/color"
 )
@@ -63,9 +65,18 @@ func Default() Palette {
 // Default with nil error (the locker must always start).
 func Load(path string) (Palette, error) {
 	pal := Default()
-	data, err := os.ReadFile(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return pal, nil // ponytail: missing palette file = defaults, not an error
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > 64<<10 {
+		return pal, nil
+	}
+	data, err := io.ReadAll(io.LimitReader(f, (64<<10)+1))
+	if err != nil || len(data) > 64<<10 {
+		return pal, nil
 	}
 	var file struct {
 		Dark map[string]string `json:"dark"`

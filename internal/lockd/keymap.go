@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -22,13 +24,23 @@ const (
 
 type keymap struct {
 	state              *xkb.State
+	mapData            *xkb.Keymap
+	compose            *xkb.ComposeState
 	depressed, latched uint32
 	locked, group      uint32
+	lastComposed       bool
 }
 
 func loadKeymap(fd int, size uint32) (*keymap, error) {
-	if size == 0 {
+	if size == 0 || size > 8<<20 {
 		return nil, fmt.Errorf("empty keymap")
+	}
+	var info unix.Stat_t
+	if err := unix.Fstat(fd, &info); err != nil {
+		return nil, err
+	}
+	if int64(size) > info.Size {
+		return nil, fmt.Errorf("keymap size exceeds descriptor")
 	}
 	data, err := unix.Mmap(fd, 0, int(size), unix.PROT_READ, unix.MAP_SHARED)
 	if err != nil {
@@ -41,7 +53,18 @@ func loadKeymap(fd int, size uint32) (*keymap, error) {
 	if err != nil {
 		return nil, fmt.Errorf("keymap parse: %w", err)
 	}
-	return &keymap{state: km.NewState()}, nil
+	k := &keymap{state: km.NewState(), mapData: km}
+	locale := "C"
+	for _, name := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
+		if value := os.Getenv(name); value != "" {
+			locale = value
+			break
+		}
+	}
+	if table, err := ctx.NewComposeTableFromLocale(locale, xkb.ComposeCompileNoFlags); err == nil {
+		k.compose = table.NewState(xkb.ComposeStateNoFlags)
+	}
+	return k, nil
 }
 
 func (k *keymap) setMask(depressed, latched, locked, group uint32) {
@@ -61,12 +84,29 @@ func (k *keymap) mods() (shift, caps bool) {
 }
 
 // resolve maps an evdev code to keysym + printable text under the current
-// mask. xkb-go v0.1.0 does not apply Caps Lock to letters, so we do. No
-// compose/dead-key support: parity with swaylock's password path (ponytail).
+// mask. xkb-go v0.1.0 does not apply Caps Lock to letters, so we do.
 func (k *keymap) resolve(code uint32) (uint32, string) {
+	k.lastComposed = false
 	s := xkb.Keycode(int32(code) + 8) // evdev -> xkb keycode offset
 	sym := uint32(k.state.KeyGetOneSym(s))
 	text := k.state.KeyGetUTF8(s)
+	// ponytail: v0.1.0 cancels compose on modifier symbols; exclude those until upstream fixes sysc-631.
+	modifier := sym >= 0xffe1 && sym <= 0xffee || sym >= 0xfe01 && sym <= 0xfe13 || sym == 0xff7e || sym == 0xff7f
+	if k.compose != nil && !modifier {
+		if k.compose.Feed(xkb.Keysym(sym)) == xkb.ComposeFeedAccepted {
+			switch k.compose.GetStatus() {
+			case xkb.ComposeComposing:
+				return sym, ""
+			case xkb.ComposeComposed:
+				k.lastComposed = true
+				text = k.compose.GetUTF8()
+				k.compose.Reset()
+			case xkb.ComposeCancelled:
+				k.compose.Reset()
+				return sym, ""
+			}
+		}
+	}
 	if shift, caps := k.mods(); caps && text != "" {
 		r, size := utf8.DecodeRuneInString(text)
 		if size == len(text) && unicode.IsLetter(r) {
@@ -82,11 +122,61 @@ func (k *keymap) resolve(code uint32) (uint32, string) {
 
 // printable keeps single printable runes; control chars arrive as keysyms.
 func printable(s string) string {
-	r, size := utf8.DecodeRuneInString(s)
-	if s == "" || size != len(s) || !unicode.IsPrint(r) {
+	if !utf8.ValidString(s) {
 		return ""
 	}
+	for _, r := range s {
+		if !unicode.IsPrint(r) {
+			return ""
+		}
+	}
 	return s
+}
+func (k *keymap) indicators() Key {
+	shift, caps := k.mods()
+	layout := k.mapData.GroupName(xkb.Group(k.group))
+	if layout == "" {
+		layout = "Group " + strconv.Itoa(int(k.group)+1)
+	}
+	return Key{Shift: shift, CapsLock: caps, NumLock: (k.depressed|k.latched|k.locked)&(1<<4) != 0, Layout: layout}
+}
+func (c *Client) updateModifiers(depressed, latched, locked, group uint32) {
+	if c.keymap == nil {
+		return
+	}
+	c.keymap.setMask(depressed, latched, locked, group)
+	if c.onKey != nil {
+		c.onKey(c.keymap.indicators())
+	}
+}
+
+type keyRepeat struct {
+	rate  int32
+	delay time.Duration
+	code  uint32
+	key   Key
+	next  time.Time
+}
+
+func (r *keyRepeat) press(code uint32, key Key, now time.Time) {
+	r.next = time.Time{}
+	if r.rate <= 0 || key.Enter || key.Escape || (key.Text == "" && !key.Backspace) {
+		return
+	}
+	r.code, r.key = code, key
+	r.next = now.Add(r.delay)
+}
+func (r *keyRepeat) release(code uint32) {
+	if r.code == code {
+		r.next = time.Time{}
+	}
+}
+func (r *keyRepeat) due(now time.Time) bool {
+	if r.next.IsZero() || now.Before(r.next) || r.rate <= 0 {
+		return false
+	}
+	r.next = now.Add(time.Second / time.Duration(r.rate))
+	return true
 }
 
 func (c *Client) setupKeyboard() {
@@ -104,19 +194,39 @@ func (c *Client) setupKeyboard() {
 			return
 		}
 		c.keymap = km
+		c.repeat.next = time.Time{}
+		c.updateModifiers(0, 0, 0, 0)
 	})
 	kbd.SetModifiersHandler(func(ev client.KeyboardModifiersEvent) {
 		if c.keymap != nil {
-			c.keymap.setMask(ev.ModsDepressed, ev.ModsLatched, ev.ModsLocked, ev.Group)
+			c.updateModifiers(ev.ModsDepressed, ev.ModsLatched, ev.ModsLocked, ev.Group)
+		}
+	})
+	kbd.SetRepeatInfoHandler(func(ev client.KeyboardRepeatInfoEvent) {
+		c.repeat.rate = max(0, min(ev.Rate, 100))
+		c.repeat.delay = time.Duration(max(0, min(ev.Delay, 10000))) * time.Millisecond
+		if c.repeat.rate == 0 {
+			c.repeat.next = time.Time{}
+		}
+	})
+	kbd.SetLeaveHandler(func(client.KeyboardLeaveEvent) {
+		c.repeat.next = time.Time{}
+		if c.keymap != nil && c.keymap.compose != nil {
+			c.keymap.compose.Reset()
 		}
 	})
 	kbd.SetKeyHandler(func(ev client.KeyboardKeyEvent) {
-		if ev.State != 1 || c.keymap == nil { // 1 = pressed; repeats ignored
+		if ev.State != 1 {
+			c.repeat.release(ev.Key)
+			return
+		}
+		if c.keymap == nil {
 			return
 		}
 		sym, text := c.keymap.resolve(ev.Key)
-		shift, caps := c.keymap.mods()
-		k := Key{Text: text, Shift: shift, CapsLock: caps}
+		k := c.keymap.indicators()
+		k.Text = text
+		k.composed = c.keymap.lastComposed
 		switch sym {
 		case symReturn, symKP_Enter:
 			k.Enter = true
@@ -125,8 +235,27 @@ func (c *Client) setupKeyboard() {
 		case symEscape:
 			k.Escape = true
 		}
+		c.repeat.press(ev.Key, k, time.Now())
+		if !c.keymap.mapData.KeyRepeats(xkb.Keycode(ev.Key + 8)) {
+			c.repeat.next = time.Time{}
+		}
 		if c.onKey != nil {
 			c.onKey(k)
 		}
 	})
+}
+
+func (c *Client) repeatKey() Key {
+	k := c.keymap.indicators()
+	k.Backspace = c.repeat.key.Backspace
+	if c.repeat.key.composed {
+		k.Text = c.repeat.key.Text
+	} else if !k.Backspace {
+		// Re-resolve the held key against the latest group/modifiers, without feeding compose twice.
+		compose := c.keymap.compose
+		c.keymap.compose = nil
+		_, k.Text = c.keymap.resolve(c.repeat.code)
+		c.keymap.compose = compose
+	}
+	return k
 }

@@ -2,7 +2,7 @@
 
 A Wayland session locker built on `ext-session-lock-v1` (compositor-enforced input
 seal), in pure Go + CGO only via `msteinert/pam/v2` for in-process PAM.
-Designed for Niri / sysc-shell; works with any conformant compositor.
+The managed owner supports Niri / sysc-shell.
 
 ## Security model
 
@@ -14,9 +14,13 @@ Designed for Niri / sysc-shell; works with any conformant compositor.
   clear and completion. Go strings and PAM/runtime copies cannot be reliably
   erased. Passwords do not enter logs or IPC. One hidden PAM prompt is supported;
   additional prompts fail without reusing the password.
-- A logind sleep inhibitor is held until the compositor confirms `locked`, then
-  released — suspend before a lock is fully up is blocked, and the shell can
-  order "lock before suspend" around it.
+- A persistent session owner holds a logind sleep delay before reporting readiness.
+  It releases that descriptor on compositor confirmation for a sleep request,
+  then re-arms on resume/unlock. logind's finite delay limit still applies.
+  Failed protection is reported separately from manual locking.
+- The session bus offers Lock, GetState and Changed only. It carries no secrets.
+  Acquisition intent and confirmed-unlock receipts survive native service restart
+  in a private runtime file. Disconnect never means authenticated unlock.
 
 ## Build
 
@@ -26,24 +30,56 @@ Requires libpam headers (`pam_apl.h`) because of the cgo PAM binding.
 
 ## Usage
 
-    sysc-lock                    # locks the current Wayland session
+    sysc-lock                    # requests the registered session owner and waits
+    sysc-lock --session          # persistent owner, started by the user unit
     sysc-lock --version
 
-Environment (display/paths only, nothing security-relevant):
+The service requires Niri's startup environment: XDG_SESSION_ID, NIRI_SOCKET,
+WAYLAND_DISPLAY and XDG_RUNTIME_DIR. Registration verifies the real UID,
+logind Wayland session and Niri IPC peer. One graphical Wayland session per UID
+is supported. Conflicting or stale registration fails explicitly.
 
-- `SYSC_LOCK_PALETTE`  palette JSON (default `~/.config/sysc-shell/palette.json`)
-- `SYSC_LOCK_WALLPAPER` static background image (falls back to theme color)
-- `SYSC_LOCK_LAYOUT`   keyboard layout label shown on the unlock screen
+Presentation loads `$XDG_CONFIG_HOME/sysc-lock/config.json` at each acquisition:
 
-Exit codes: `0` unlocked, `1` no display / connection lost, `2` lock refused
-(already locked), `3` terminated before lock was established, `4` sleep
-inhibitor unavailable (session stays unlocked), `5` lock ended by compositor.
+```json
+{"effect":"rain","palette":"nord","reduced_motion":false}
+```
 
-On the compositor Locked event it prints `sysc-lock: locked`
-to stdout — sysc-shell uses that line for its spawn handshake.
+Shell Settings → Lock Screen edits this file and provides a labeled ordinary
+preview. Apply affects the next lock. The shared renderer comes from the pinned
+sysc-terminal revision; wallpaper/invalid-effect failures use an opaque fallback.
+`SYSC_LOCK_PALETTE` supplies the foreground palette. `SYSC_LOCK_WALLPAPER`
+selects a static PNG/JPEG instead of the effect. The worker decodes it once per
+acquisition and scales it when output geometry changes. Files above 16 MiB or
+4 million pixels use the solid fallback; decoded assets share the pixel budget.
+The owner resolves the PAM account once per acquisition from the real UID.
 
-## sysc-shell integration (planned, see docs/plans in sysc-shell)
+The CLI prints `sysc-lock: locked` on a sealed snapshot and returns success only
+with a matching confirmed-unlock receipt. Refusal, lost ownership or transport
+uncertainty returns failure. The service restarts on failure with a three-start
+limit per minute; an exhausted recovery still leaves the compositor locked.
 
-Set in shell config: `{ "session": { "locker": "sysc-lock" } }`.
-The shell tracks the process, re-acquires on respawn-once after crash, pauses
-wallpaper animation while locked, and exposes `session.lock-state` over IPC.
+`scripts/install CANDIDATE ABSOLUTE_PREFIX` installs the executable and user unit.
+It does not enable/start services or modify PAM. Review the candidate and recovery
+route before activating the unit in a coordinated Niri session. The unit disables
+core dumps. It permits the established PAM stack's native helper behavior.
+
+Local checks cover state, input, PAM classification, marker recovery and sleep
+ordering. Production Niri readmission, laptop PAM/lid/DPMS and physical hotplug
+remain release gates in the sysc-shell implementation plan.
+
+## Qualification evidence
+
+Build the production candidate with PAM headers, then collect offline evidence:
+
+```sh
+CGO_ENABLED=1 go build -o /tmp/sysc-lock-candidate ./cmd/sysc-lock
+scripts/qualify offline /tmp/sysc-lock-candidate /tmp/sysc-lock-evidence --ack-local-checks
+```
+
+For a coordinated live run, `scripts/qualify sample PID 600 EVIDENCE_DIR`
+records CPU, RSS and descriptor counts for a recorded process owned by your UID.
+Collect compositor events, commit cadence and input latency alongside these
+samples. The script does not activate the service or perform locking/sleep.
+The implementation plan lists the production PAM, recovery, sleep and output
+gates; offline snapshots and local checks do not qualify them.

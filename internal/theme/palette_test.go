@@ -3,7 +3,9 @@ package theme
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 )
 
 const fixture = `{
@@ -75,5 +77,27 @@ func TestDefaultsNonzero(t *testing.T) {
 	pal := Default()
 	if pal.Surface.A != 0xFF || pal.OnSurface.A != 0xFF {
 		t.Fatal("defaults must be opaque")
+	}
+}
+
+func TestFIFOIsIgnoredWithoutBlocking(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "palette.json")
+	if err := syscall.Mkfifo(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = Load(path)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		writer, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if err == nil {
+			_ = writer.Close()
+			<-done
+		}
+		t.Fatal("FIFO palette blocked locker startup")
 	}
 }

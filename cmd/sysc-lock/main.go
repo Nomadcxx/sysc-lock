@@ -1,7 +1,5 @@
-// Command sysc-lock locks the Wayland session via ext-session-lock-v1 and
-// unlocks it with in-process PAM (service "login"). The default build has no
-// bypass of any kind: no flag or env disables authentication or the inhibitor
-// in Task 14).
+// Command sysc-lock requests the supervised Wayland session owner.
+// The --session owner acquires ext-session-lock-v1 and authenticates with PAM.
 package main
 
 import (
@@ -13,46 +11,55 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
+	"github.com/Nomadcxx/sysc-lock/internal/config"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
 )
 
-// Exit codes (contract with sysc-shell):
-//
-//	0 unlocked (PAM success)
-//	2 refused  (compositor already locked / finished before locked)
-//	3 aborted  (SIGTERM before the lock was confirmed; session never sealed)
-//	4 no-inhibitor (logind unavailable; refusing to lock without sleep guard)
-//	5 terminated (compositor ended the lock unexpectedly; respawn-eligible)
-//	1 any other failure (connection lost, protocol error)
+// The request command exits 0 after confirmed authenticated unlock; failures exit 1.
+// The persistent owner reports acquisition/unlock outcomes through its snapshots.
 const version = "0.1.0-dev"
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		fmt.Println("sysc-lock", version)
 		return
 	}
-	if os.Getenv("WAYLAND_DISPLAY") == "" {
-		fmt.Fprintln(os.Stderr, "sysc-lock: WAYLAND_DISPLAY not set")
+	var err error
+	switch {
+	case len(os.Args) == 1:
+		err = requestLock()
+	case len(os.Args) == 2 && os.Args[1] == "--session":
+		err = runSession()
+	default:
+		err = fmt.Errorf("usage: sysc-lock [--session|--version]")
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
 		os.Exit(1)
 	}
+}
 
-	release := takeInhibit()
+// runLocker owns a single acquisition. The persistent session owns supervision.
+func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Phase, error) {
+	if os.Getenv("WAYLAND_DISPLAY") == "" {
+		return lockd.Idle, fmt.Errorf("WAYLAND_DISPLAY not set")
+	}
 
 	// SIGTERM before the compositor confirms "locked": abandon the lock
-	// request (spec-legal: the session was never sealed) and exit 3. After
+	// request (the session was never sealed). After
 	// confirmation the lock MUST stay; ignore termination signals — the only
 	// way out is authentication.
 	sigs := make(chan os.Signal, 2)
+	defer signal.Stop(sigs)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 
 	user, err := currentUser()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
-		release()
-		os.Exit(1)
+		return lockd.Idle, err
 	}
 	host, _ := os.Hostname()
 	pal, err := theme.Load(palettePath())
@@ -60,8 +67,8 @@ func main() {
 		pal = theme.Default()
 	}
 	view := lockd.NewView(pal, user, host)
-	view.Background = os.Getenv("SYSC_LOCK_WALLPAPER")
-	view.Layout = os.Getenv("SYSC_LOCK_LAYOUT")
+	view.TextScale = lockd.SystemTextScale()
+
 	model := &input.Model{}
 	defer model.Clear()
 	view.Entry = model
@@ -74,7 +81,9 @@ func main() {
 	client, err = lockd.Connect(st, func(k lockd.Key) {
 		// Runs on the pump goroutine — sole mutator of model/view.
 		view.Caps = k.CapsLock
-		if view.Terminal() {
+		view.Layout = k.Layout
+		view.Num = k.NumLock
+		if view.Terminal() || st.Phase() != lockd.Locked {
 			client.Repaint()
 			return
 		}
@@ -86,48 +95,62 @@ func main() {
 			view.Busy = true
 			go authenticate(authenticator, model.Password(), client, view, model, gate, gate.generation)
 		}
+		client.SetMotionFrozen(gate.busy || len(model.Pass) > 0, time.Now())
 		client.Repaint()
-	}, func(w, h int) ([]byte, error) {
-		fb := render.New(w, h)
-		view.Render(fb, time.Now())
-		return fb.Pix, nil
+	}, func(fb *render.Framebuffer, scale float64, background []byte) error {
+		view.Scale = scale
+		if background == nil {
+			view.Render(fb, time.Now())
+		} else {
+			copy(fb.Pix, background)
+			for i := 0; i < len(fb.Pix); i += 4 {
+				fb.Pix[i] /= 3
+				fb.Pix[i+1] /= 3
+				fb.Pix[i+2] /= 3
+			}
+			view.RenderForeground(fb, time.Now())
+		}
+		return nil
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
-		release()
-		os.Exit(1)
+		return lockd.Idle, err
 	}
-	go watchSignals(sigs, client, release)
-	watchLocked(client, release)
+	stopSignals := make(chan struct{})
+	defer close(stopSignals)
+	go func() {
+		for {
+			select {
+			case <-stopSignals:
+				return
+			case <-sigs:
+				client.Post(func() { client.AbortBeforeLocked() })
+			}
+		}
+	}()
+	client.OnEvent = report
+	client.BeforeUnlock = beforeUnlock
+	defer client.Close()
+	client.OnDeadline = view.NextDeadline
+	cfg, configErr := config.Load(config.Path())
+	if configErr != nil {
+		fmt.Fprintln(os.Stderr, "sysc-lock: invalid presentation config; using fallback")
+		cfg = config.Default()
+		cfg.ReducedMotion = true
+	}
+	client.EnableBackground(cfg.Effect, cfg.Palette, cfg.ReducedMotion)
+	client.EnableWallpaper(os.Getenv("SYSC_LOCK_WALLPAPER"))
 
 	if err := client.Lock(); err != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
-		release()
-		os.Exit(1)
+		return lockd.Idle, err
 	}
 	if err := client.Run(); err != nil {
-		if errors.Is(err, lockd.ErrAborted) {
-			release()
-			os.Exit(3)
-		}
+
 		fmt.Fprintln(os.Stderr, "sysc-lock: connection lost:", err)
-		release()
-		os.Exit(1)
+		return client.State().Phase(), err
 	}
-	release()
-	switch client.State().Phase() {
-	case lockd.Done:
-		fmt.Println("sysc-lock: unlocked")
-		os.Exit(0)
-	case lockd.Refused:
-		fmt.Fprintln(os.Stderr, "sysc-lock: refused (session already locked)")
-		os.Exit(2)
-	case lockd.Terminated:
-		fmt.Fprintln(os.Stderr, "sysc-lock: terminated by compositor")
-		os.Exit(5)
-	default:
-		os.Exit(1)
-	}
+	return client.State().Phase(), client.WaitBackground()
 }
 
 func authenticate(a authenticator, pass string, client *lockd.Client, view *lockd.View, model *input.Model, gate *enterGate, generation uint64) {
@@ -146,7 +169,11 @@ func authenticate(a authenticator, pass string, client *lockd.Client, view *lock
 		case res.OK:
 			view.SetError("", time.Now())
 			if err := client.UnlockAndQuit(); err != nil {
-				view.SetErrorTerminal("Unlock confirmation failed", time.Now())
+				if errors.Is(err, lockd.ErrUnlockDeferred) {
+					view.SetError("Resume before unlocking", time.Now())
+				} else {
+					view.SetErrorTerminal("Unlock confirmation failed", time.Now())
+				}
 			}
 		case res.Terminal:
 			view.SetErrorTerminal(res.Message, time.Now())
@@ -155,6 +182,7 @@ func authenticate(a authenticator, pass string, client *lockd.Client, view *lock
 			view.SetError(res.Message, time.Now())
 			view.NoteAttempt(time.Now())
 		}
+		client.SetMotionFrozen(false, time.Now())
 		client.Repaint()
 	})
 }

@@ -49,10 +49,10 @@ func TestBusyEntryCannotChange(t *testing.T) {
 
 func TestLateAuthResultIgnored(t *testing.T) {
 	g := &enterGate{}
-	g.try("one")
+	g.try(true)
 	old := g.generation
 	g.release()
-	g.try("two")
+	g.try(true)
 	if g.accept(old, lockd.Locked) {
 		t.Fatal("accepted stale generation")
 	}
@@ -66,17 +66,17 @@ func TestLateAuthResultIgnored(t *testing.T) {
 
 func TestEnterGateRejectsEmptyAndOverlap(t *testing.T) {
 	var g enterGate
-	if g.try("") {
+	if g.try(false) {
 		t.Fatal("empty password must not start auth")
 	}
-	if !g.try("secret") {
+	if !g.try(true) {
 		t.Fatal("first Enter must start auth")
 	}
-	if g.try("secret") {
+	if g.try(true) {
 		t.Fatal("overlapping Enter must be ignored")
 	}
 	g.release()
-	if !g.try("secret") {
+	if !g.try(true) {
 		t.Fatal("after release, Enter must start auth again")
 	}
 }

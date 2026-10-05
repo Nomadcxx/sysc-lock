@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/msteinert/pam/v2"
 )
 
 // testFake lives here only; no production bypass exists (design §5).
@@ -86,5 +88,56 @@ func TestAdditionalPamPromptRejected(t *testing.T) {
 	}
 	if got, err := PasswordPrompt("secret")("Visible", true); err == nil || got != "" {
 		t.Fatal("visible prompt accepted")
+	}
+}
+
+func TestPAMRejectedConversationCannotSucceed(t *testing.T) {
+	for _, stage := range []string{"authenticate", "account"} {
+		t.Run(stage, func(t *testing.T) {
+			var conversationErr error
+			accounts := 0
+			auth := func(pam.Flags) error {
+				if stage == "authenticate" {
+					conversationErr = errors.New("rejected prompt")
+				}
+				return nil // A module may ignore a conversation failure.
+			}
+			account := func(pam.Flags) error {
+				accounts++
+				if stage == "account" {
+					conversationErr = errors.New("rejected prompt")
+				}
+				return nil
+			}
+			result := verifyTransaction(auth, account, &conversationErr)
+			if result.OK || result.Message != "Additional prompt unsupported" {
+				t.Fatalf("conversation failure accepted: %+v", result)
+			}
+			if stage == "authenticate" && accounts != 0 {
+				t.Fatal("account management ran after rejected authentication conversation")
+			}
+		})
+	}
+}
+
+func TestPAMConversationRejectsUnsupportedStyles(t *testing.T) {
+	for _, style := range []pam.Style{pam.PromptEchoOn, pam.Style(999)} {
+		var failure error
+		calls := 0
+		conversation := pamConversation(func(string, bool) (string, error) { calls++; return "secret", nil }, &failure)
+		if answer, err := conversation(style, "Unsupported"); answer != "" || err == nil || failure == nil {
+			t.Fatalf("accepted style %d", style)
+		}
+		if answer, err := conversation(pam.PromptEchoOff, "Password"); answer != "" || err == nil || calls != 0 {
+			t.Fatal("continued after failed conversation")
+		}
+	}
+	var failure error
+	conversation := pamConversation(func(string, bool) (string, error) { return "secret", nil }, &failure)
+	if answer, err := conversation(pam.PromptEchoOff, "Password"); answer != "secret" || err != nil {
+		t.Fatal(answer, err)
+	}
+	if answer, err := conversation(pam.PromptEchoOff, "OTP"); answer != "" || err == nil || failure == nil {
+		t.Fatal("accepted second hidden prompt")
 	}
 }

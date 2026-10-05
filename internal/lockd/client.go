@@ -2,9 +2,13 @@ package lockd
 
 import (
 	"fmt"
+	"github.com/Nomadcxx/sysc-lock/internal/lockd/fractionalscale"
+	"github.com/Nomadcxx/sysc-lock/internal/lockd/viewporter"
+	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"os"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/Nomadcxx/sysc-wayland/client"
 	"github.com/Nomadcxx/sysc-wayland/sessionlock"
@@ -21,38 +25,57 @@ type Key struct {
 	Escape    bool
 	Shift     bool
 	CapsLock  bool
+	NumLock   bool
+	Layout    string
+	composed  bool // a completed compose sequence repeats its committed character
 }
 
 // KeyFunc receives every pressed key.
 type KeyFunc func(Key)
 
-// FrameFunc produces an RGBA pixel buffer of exactly w*4*h bytes for one
-// lock surface at pixel size w,h.
-type FrameFunc func(w, h int) ([]byte, error)
+// FrameFunc composes foreground into caller-owned opaque BGRA storage.
+type FrameFunc func(fb *render.Framebuffer, scale float64, background []byte) error
 
 // Client owns the Wayland connection, the session lock, and one lock surface
 // per output. All protocol mutations run on the single pump goroutine; other
 // goroutines must go through Post.
 type Client struct {
-	display  *client.Display
-	registry *client.Registry
-	state    *State
-	onKey    KeyFunc
-	frame    FrameFunc
-	OnEvent  func(Snapshot) // called only on the Wayland owner
-	fatal    error
-	uiError  string
+	display      *client.Display
+	registry     *client.Registry
+	state        *State
+	onKey        KeyFunc
+	frame        FrameFunc
+	BeforeUnlock func() error   // persistent owner atomically admits authenticated unlock
+	OnEvent      func(Snapshot) // called only on the Wayland owner
+	fatal        error
+	uiError      string
+	lastSnapshot *Snapshot
 
-	compositor *client.Compositor
-	shm        *client.Shm
-	shmFmt     uint32
-	haveFmt    bool
-	seat       *client.Seat
-	keymap     *keymap
-	keyboard   *client.Keyboard
-	mgr        *sessionlock.ExtSessionLockManagerV1
-	lock       *sessionlock.ExtSessionLockV1
-	outputs    map[OutputID]*lockOut
+	compositor         *client.Compositor
+	shm                *client.Shm
+	shmFmt             uint32
+	haveFmt            bool
+	seat               *client.Seat
+	keymap             *keymap
+	keyboard           *client.Keyboard
+	pointer            *client.Pointer
+	pointerOut         *lockOut
+	pointerX, pointerY float64
+	repeat             keyRepeat
+	requestDeadline    time.Time
+	mgr                *sessionlock.ExtSessionLockManagerV1
+	lock               *sessionlock.ExtSessionLockV1
+	outputs            map[OutputID]*lockOut
+	removed            []*lockOut
+	viewporter         *viewporter.WpViewporter
+	scaleManager       *fractionalscale.WpFractionalScaleManagerV1
+	effect, palette    string
+	wallpaper          *wallpaperAsset
+	reduced, frozen    bool
+	resumeAt           time.Time
+	OnDeadline         func(time.Time) time.Time
+	deadline           time.Time
+	closed             bool
 
 	wlFD   int
 	wakeR  int
@@ -62,21 +85,31 @@ type Client struct {
 }
 
 type lockOut struct {
-	id        OutputID
-	output    *client.Output
-	scale     int32
-	surface   *client.Surface
-	lockSurf  *sessionlock.ExtSessionLockSurfaceV1
-	w, h      int // pixel size from the last configure ack
-	committed bool
-	buffers   []*shmBuffer
+	id                 OutputID
+	output             *client.Output
+	scale              int32
+	surface            *client.Surface
+	lockSurf           *sessionlock.ExtSessionLockSurfaceV1
+	w, h               int // pixel size from the last configure ack
+	committed          bool
+	buffers            []*shmBuffer
+	logicalW, logicalH int
+	scale120           uint32
+	viewport           *viewporter.WpViewport
+	fractional         *fractionalscale.WpFractionalScaleV1
+	pending, removed   bool
+	callback           *client.Callback
+	lastFrame          time.Time
+	background         *backgroundWorker
 }
 
 type shmBuffer struct {
-	pool *client.ShmPool
-	buf  *client.Buffer
-	data []byte
-	id   OutputID
+	pool          *client.ShmPool
+	buf           *client.Buffer
+	data          []byte
+	id            OutputID
+	w, h          int
+	busy, retired bool
 }
 
 func Connect(state *State, onKey KeyFunc, frame FrameFunc) (*Client, error) {
@@ -92,6 +125,10 @@ func Connect(state *State, onKey KeyFunc, frame FrameFunc) (*Client, error) {
 		outputs: make(map[OutputID]*lockOut),
 	}
 	ctx := display.Context()
+	if err := ctx.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		ctx.Close()
+		return nil, err
+	}
 	reg, err := display.GetRegistry()
 	if err != nil {
 		ctx.Close()
@@ -112,6 +149,10 @@ func Connect(state *State, onKey KeyFunc, frame FrameFunc) (*Client, error) {
 		ctx.Close()
 		return nil, fmt.Errorf("compositor exposes no compositor/shm/seat")
 	}
+	if err := ctx.SetReadDeadline(time.Time{}); err != nil {
+		ctx.Close()
+		return nil, err
+	}
 	var w int
 	if err := ctx.ControlFD(func(fd int) error {
 		wl, err := unix.FcntlInt(uintptr(fd), unix.F_DUPFD_CLOEXEC, 0)
@@ -126,6 +167,7 @@ func Connect(state *State, onKey KeyFunc, frame FrameFunc) (*Client, error) {
 	c.wlFD = w
 	pipe := make([]int, 2)
 	if err := unix.Pipe2(pipe, unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
+		unix.Close(w)
 		ctx.Close()
 		return nil, fmt.Errorf("wake pipe: %w", err)
 	}
@@ -170,8 +212,40 @@ func (c *Client) global(g client.RegistryGlobalEvent) {
 			o := client.NewSeat(ctx)
 			if bind(o, 5) == nil {
 				c.seat = o
-				c.setupKeyboard()
+				o.SetCapabilitiesHandler(func(ev client.SeatCapabilitiesEvent) {
+					if ev.Capabilities&2 != 0 && c.keyboard == nil {
+						c.setupKeyboard()
+					}
+					if ev.Capabilities&1 != 0 && c.pointer == nil {
+						c.setupPointer()
+					}
+					if ev.Capabilities&2 == 0 && c.keyboard != nil {
+						_ = c.keyboard.Release()
+						c.keyboard = nil
+						c.keymap = nil
+						c.repeat.next = time.Time{}
+					}
+					if ev.Capabilities&1 == 0 && c.pointer != nil {
+						_ = c.pointer.Release()
+						c.pointer = nil
+						c.pointerOut = nil
+					}
+				})
 			}
+		}
+	case "wp_viewporter":
+		p := viewporter.NewWpViewporter(ctx)
+		if err := bind(p, 1); err != nil {
+			c.fatal = err
+		} else {
+			c.viewporter = p
+		}
+	case "wp_fractional_scale_manager_v1":
+		p := fractionalscale.NewWpFractionalScaleManagerV1(ctx)
+		if err := bind(p, 1); err != nil {
+			c.fatal = err
+		} else {
+			c.scaleManager = p
 		}
 	case "wl_output":
 		o := client.NewOutput(ctx)
@@ -199,6 +273,8 @@ func (c *Client) Lock() error {
 		return fmt.Errorf("lock: %w", err)
 	}
 	c.lock = lock
+	c.requestDeadline = time.Now().Add(3 * time.Second)
+	c.publish()
 	lock.SetLockedHandler(func(sessionlock.ExtSessionLockV1LockedEvent) {
 		if err := c.state.Locked(); err != nil {
 			c.fatal = err
@@ -236,6 +312,9 @@ func (c *Client) addOutput(id OutputID, o *client.Output) {
 		if ev.Factor > 0 {
 			if c.outputs[id] == out {
 				out.scale = ev.Factor
+				if out.scale120 == 0 && out.logicalW > 0 {
+					c.resizeOutput(out)
+				}
 			}
 		}
 	})
@@ -269,16 +348,50 @@ func (c *Client) createLockSurface(id OutputID, out *lockOut) {
 	ls.SetConfigureHandler(func(ev sessionlock.ExtSessionLockSurfaceV1ConfigureEvent) {
 		c.configure(out, ev.Serial, int(ev.Width), int(ev.Height))
 	})
+	if c.viewporter != nil && c.scaleManager != nil {
+		viewport, err := c.viewporter.GetViewport(surf)
+		if err != nil {
+			c.scaleFallback(err)
+			return
+		}
+		out.viewport = viewport
+		fractional, err := c.scaleManager.GetFractionalScale(surf)
+		if err != nil {
+			if e := viewport.Destroy(); e != nil {
+				c.failUI(e)
+			}
+			out.viewport = nil
+			c.scaleFallback(err)
+			return
+		}
+		out.fractional = fractional
+		fractional.SetPreferredScaleHandler(func(ev fractionalscale.WpFractionalScaleV1PreferredScaleEvent) {
+			if c.outputs[id] != out {
+				return
+			}
+			if ev.Scale == 0 || ev.Scale > 480 {
+				c.failUI(fmt.Errorf("invalid fractional scale"))
+				return
+			}
+			out.scale120 = ev.Scale
+			if out.logicalW > 0 {
+				c.resizeOutput(out)
+			}
+		})
+	}
 }
 
 func (c *Client) configure(out *lockOut, serial uint32, w, h int) {
 	if out.lockSurf == nil || c.outputs[out.id] != out {
 		return
 	}
-	// The FSM guards the exact pixel size we will commit: logical
-	// configure size times output scale.
-	pw, ph := uint32(w)*uint32(out.scale), uint32(h)*uint32(out.scale)
-	if err := c.state.Configure(out.id, serial, pw, ph); err != nil {
+	out.logicalW, out.logicalH = w, h
+	pw, ph, _, err := out.geometry()
+	if err != nil {
+		c.failUI(err)
+		return
+	}
+	if err = c.state.Configure(out.id, serial, uint32(pw), uint32(ph)); err != nil {
 		c.failUI(err)
 		return
 	}
@@ -287,84 +400,137 @@ func (c *Client) configure(out *lockOut, serial uint32, w, h int) {
 		c.failUI(err)
 		return
 	}
-	if err := out.lockSurf.AckConfigure(ack); err != nil {
+	if err = out.lockSurf.AckConfigure(ack); err != nil {
 		c.failUI(err)
 		return
 	}
-	if err := c.commitFrame(out, int(pw), int(ph)); err != nil {
-		c.failUI(err)
-		return
-	}
-	if err := c.state.Commit(out.id, pw, ph); err != nil {
-		c.failUI(err)
-	}
-	c.publish()
+	out.w, out.h = pw, ph
+	out.pending = true
+	c.paint(out)
 }
-
-func (c *Client) commitFrame(out *lockOut, w, h int) error {
-	if w <= 0 || h <= 0 {
-		return fmt.Errorf("invalid size %dx%d", w, h)
+func (out *lockOut) geometry() (int, int, float64, error) {
+	scale := float64(out.scale)
+	if out.viewport != nil && out.scale120 != 0 {
+		scale = float64(max(out.scale120, 120)) / 120
 	}
-	stride := w * 4
-	size := stride * h
-	if size <= 0 || int64(size) > 1<<30 {
-		return fmt.Errorf("buffer too large")
+	if scale < 1 || scale > 4 || out.logicalW <= 0 || out.logicalH <= 0 || out.logicalW > 1<<20 || out.logicalH > 1<<20 {
+		return 0, 0, 0, fmt.Errorf("invalid configured geometry")
 	}
-	px, err := c.frame(w, h)
+	w, h := int(float64(out.logicalW)*scale+0.999), int(float64(out.logicalH)*scale+0.999)
+	_, err := bufferBytes(w, h)
+	return w, h, scale, err
+}
+func (c *Client) resizeOutput(out *lockOut) {
+	w, h, _, err := out.geometry()
+	if err != nil {
+		c.failUI(err)
+		return
+	}
+	if w == out.w && h == out.h {
+		return
+	}
+	// Scale changes preserve the already-acknowledged configure serial.
+	if err = c.state.Resize(out.id, uint32(w), uint32(h)); err != nil {
+		c.failUI(err)
+		return
+	}
+	out.w, out.h = w, h
+	out.pending = true
+	c.paint(out)
+}
+func (c *Client) paint(out *lockOut) {
+	if !out.pending || out.removed || out.surface == nil || c.state.Phase() > Locked {
+		return
+	}
+	ready, err := c.prepareBuffers(out, out.w, out.h)
+	if err != nil {
+		c.failUI(err)
+		return
+	}
+	if !ready {
+		return
+	}
+	sb := out.availableBuffer(out.w, out.h)
+	if sb == nil {
+		return
+	}
+	_, _, scale, err := out.geometry()
+	if err != nil {
+		c.failUI(err)
+		return
+	}
+	pixels := out.backgroundPixels()
+	fb := &render.Framebuffer{Width: out.w, Height: out.h, Stride: out.w * 4, Pix: sb.data}
+	if err = c.frame(fb, scale, pixels); err != nil {
+		c.failUI(err)
+		return
+	}
+	bufferScale := out.scale
+	if out.viewport != nil {
+		bufferScale = 1
+		if err = out.viewport.SetDestination(int32(out.logicalW), int32(out.logicalH)); err != nil {
+			c.failUI(err)
+			return
+		}
+	}
+	if err = out.surface.SetBufferScale(bufferScale); err != nil {
+		c.failUI(err)
+		return
+	}
+	if err = out.surface.Attach(sb.buf, 0, 0); err != nil {
+		c.failUI(err)
+		return
+	}
+	if err = out.surface.Damage(0, 0, int32(out.logicalW), int32(out.logicalH)); err != nil {
+		c.failUI(err)
+		return
+	}
+	if err = c.armFrame(out, false); err != nil {
+		c.failUI(err)
+		return
+	}
+	sb.busy = true
+	if err = out.surface.Commit(); err != nil {
+		sb.busy = false
+		c.failUI(err)
+		return
+	}
+	first := !out.committed
+	out.committed = true
+	out.pending = false
+	if err = c.state.Commit(out.id, uint32(out.w), uint32(out.h)); err != nil {
+		c.failUI(err)
+		return
+	}
+	if first {
+		c.publish()
+	}
+	c.scheduleBackground(out, time.Now())
+}
+func (c *Client) armFrame(out *lockOut, commit bool) error {
+	if out.callback != nil {
+		return nil
+	}
+	cb, err := out.surface.Frame()
 	if err != nil {
 		return err
 	}
-	if len(px) != size {
-		return fmt.Errorf("frame %d bytes, want %d", len(px), size)
-	}
-	if !c.haveFmt {
-		return fmt.Errorf("no shm format advertised")
-	}
-	fd, err := unix.MemfdCreate("sysc-lock", unix.MFD_CLOEXEC)
-	if err != nil {
-		return fmt.Errorf("memfd: %w", err)
-	}
-	if err := unix.Ftruncate(fd, int64(size)); err != nil {
-		unix.Close(fd)
-		return fmt.Errorf("ftruncate: %w", err)
-	}
-	data, err := unix.Mmap(fd, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		unix.Close(fd)
-		return fmt.Errorf("mmap: %w", err)
-	}
-	copy(data, px)
-	// ponytail: one fresh pool+buffer per frame (redraws are <2 fps: clock
-	// tick and keystrokes); the wl_buffer.release handler frees it. Pool
-	// recycling only matters if release lags behind redraws.
-	pool, err := c.shm.CreatePool(fd, int32(size))
-	unix.Close(fd)
-	if err != nil {
-		unix.Munmap(data)
-		return fmt.Errorf("create pool: %w", err)
-	}
-	buf, err := pool.CreateBuffer(0, int32(w), int32(h), int32(stride), c.shmFmt)
-	if err != nil {
-		pool.Destroy()
-		unix.Munmap(data)
-		return fmt.Errorf("create buffer: %w", err)
-	}
-	sb := &shmBuffer{pool: pool, buf: buf, data: data, id: out.id}
-	buf.SetReleaseHandler(func(client.BufferReleaseEvent) {
-		c.freeBuffer(out, sb)
+	out.callback = cb
+	cb.SetDoneHandler(func(client.CallbackDoneEvent) {
+		if err := cb.Destroy(); err != nil {
+			c.failUI(err)
+		}
+		if out.callback == cb {
+			out.callback = nil
+		}
+		if out.removed {
+			return
+		}
+		c.scheduleBackground(out, time.Now())
 	})
-	out.surface.SetBufferScale(out.scale)
-	if err := out.surface.Attach(buf, 0, 0); err != nil {
-		c.freeBuffer(out, sb)
-		return fmt.Errorf("attach: %w", err)
+	if commit {
+		return out.surface.Commit()
 	}
-	out.surface.Damage(0, 0, int32(w), int32(h))
-	if err := out.surface.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-	out.w, out.h = w, h
-	out.committed = true
-	out.buffers = append(out.buffers, sb)
 	return nil
 }
 
@@ -396,16 +562,40 @@ func (c *Client) freeBuffer(out *lockOut, sb *shmBuffer) {
 }
 
 func (c *Client) destroyOut(out *lockOut) {
+	out.removed = true
+	if out.background != nil {
+		out.background.stop()
+	}
+	if out.callback != nil {
+		if err := out.callback.Destroy(); err != nil {
+			c.failUI(err)
+		}
+		out.callback = nil
+	}
+	if out.fractional != nil {
+		if err := out.fractional.Destroy(); err != nil {
+			c.failUI(err)
+		}
+		out.fractional = nil
+	}
+	if out.viewport != nil {
+		if err := out.viewport.Destroy(); err != nil {
+			c.failUI(err)
+		}
+		out.viewport = nil
+	}
 	if out.lockSurf != nil {
 		if err := out.lockSurf.Destroy(); err != nil {
 			c.failUI(err)
 		}
 		out.lockSurf = nil
 	}
-	for len(out.buffers) > 0 {
-		c.freeBuffer(out, out.buffers[0])
+	for _, b := range append([]*shmBuffer(nil), out.buffers...) {
+		b.retired = true
+		if !b.busy {
+			c.freeBuffer(out, b)
+		}
 	}
-	out.buffers = nil
 	if out.surface != nil {
 		if err := out.surface.Destroy(); err != nil {
 			c.failUI(err)
@@ -417,7 +607,19 @@ func (c *Client) destroyOut(out *lockOut) {
 // UnlockAndQuit drives the successful-auth path: unlock, tear surfaces down,
 // let Run exit. Safe to call from a Post closure.
 func (c *Client) UnlockAndQuit() error {
-	err := c.state.CompleteUnlock(c.lock.UnlockAndDestroy, c.display.Roundtrip)
+	if c.state.Phase() != Locked {
+		return ErrInvalidUnlock
+	}
+	if c.BeforeUnlock != nil {
+		if err := c.BeforeUnlock(); err != nil {
+			return err
+		}
+	}
+	if err := c.display.Context().SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		c.fatal = err
+		return err
+	}
+	err := c.state.CompleteUnlock(c.lock.UnlockAndDestroy, c.display.Roundtrip, c.publish)
 	if err != nil {
 		c.fatal = fmt.Errorf("unlock confirmation: %w", err)
 		return c.fatal
@@ -433,6 +635,15 @@ func (c *Client) publish() {
 	if c.OnEvent != nil {
 		v := c.state.Snapshot()
 		v.UIError = c.uiError
+		v.Background = c.backgroundStatus(time.Now())
+		if c.lastSnapshot != nil {
+			previous := *c.lastSnapshot
+			previous.Sequence = v.Sequence
+			if previous == v {
+				return
+			}
+		}
+		c.lastSnapshot = &v
 		c.OnEvent(v)
 	}
 }
@@ -445,6 +656,7 @@ func (c *Client) removeOutput(id OutputID) {
 	if out := c.outputs[id]; out != nil {
 		delete(c.outputs, id)
 		c.destroyOut(out)
+		c.removed = append(c.removed, out)
 		if out.output != nil {
 			if err := out.output.Release(); err != nil {
 				c.failUI(err)
@@ -471,10 +683,14 @@ var ErrAborted = fmt.Errorf("lock request aborted")
 // goroutine.
 func (c *Client) Post(fn func()) {
 	c.pendMu.Lock()
+	if c.closed {
+		c.pendMu.Unlock()
+		return
+	}
 	c.pend = append(c.pend, fn)
-	c.pendMu.Unlock()
 	var b [1]byte = [1]byte{1}
 	_, _ = unix.Write(c.wakeW, b[:])
+	c.pendMu.Unlock()
 }
 
 func (c *Client) drainWake() {
@@ -510,7 +726,46 @@ func (c *Client) Run() error {
 			{Fd: int32(c.wlFD), Events: unix.POLLIN},
 			{Fd: int32(c.wakeR), Events: unix.POLLIN},
 		}
-		n, err := unix.Poll(fds, -1)
+		now := time.Now()
+		c.expireBackground(now)
+		if ph == Requesting && !now.Before(c.requestDeadline) {
+			return fmt.Errorf("lock acquisition deadline expired")
+		}
+		if c.repeat.due(now) && c.onKey != nil {
+			k := c.repeatKey()
+			c.onKey(k)
+		}
+		if c.OnDeadline != nil && (c.deadline.IsZero() || !now.Before(c.deadline)) {
+			c.repaintOwner()
+			c.deadline = c.OnDeadline(now)
+		}
+		if !c.resumeAt.IsZero() && !now.Before(c.resumeAt) {
+			c.resumeAt = time.Time{}
+			c.publish()
+			for _, out := range c.outputs {
+				c.scheduleBackground(out, now)
+			}
+		}
+		wait := -1
+		next := c.deadline
+		for _, out := range c.outputs {
+			if b := out.background; b != nil && !b.failed && !b.jobDeadline.IsZero() && (next.IsZero() || b.jobDeadline.Before(next)) {
+				next = b.jobDeadline
+			}
+		}
+		if ph == Requesting && (next.IsZero() || c.requestDeadline.Before(next)) {
+			next = c.requestDeadline
+		}
+		if !c.repeat.next.IsZero() && (next.IsZero() || c.repeat.next.Before(next)) {
+			next = c.repeat.next
+		}
+		if !c.resumeAt.IsZero() && (next.IsZero() || c.resumeAt.Before(next)) {
+			next = c.resumeAt
+		}
+		if !next.IsZero() {
+			wait = max(0, int(time.Until(next).Milliseconds()))
+		}
+		n, err := unix.Poll(fds, wait)
 		if err != nil {
 			if err == syscall.EINTR {
 				continue
@@ -561,6 +816,14 @@ func pollIn(fd int, timeoutMS int) (bool, error) {
 }
 
 func (c *Client) close() {
+	c.pendMu.Lock()
+	if c.closed {
+		c.pendMu.Unlock()
+		return
+	}
+	c.closed = true
+	c.pend = nil
+	c.pendMu.Unlock()
 	for _, out := range c.outputs {
 		c.destroyOut(out)
 	}
@@ -572,25 +835,44 @@ func (c *Client) close() {
 		unix.Close(c.wlFD)
 	}
 	c.display.Context().Close()
+	for _, out := range c.outputs {
+		for len(out.buffers) > 0 {
+			c.freeBuffer(out, out.buffers[0])
+		}
+	}
+	for _, out := range c.removed {
+		for len(out.buffers) > 0 {
+			c.freeBuffer(out, out.buffers[0])
+		}
+	}
 }
 
 // State exposes the state machine (read phase from any goroutine).
 func (c *Client) State() *State { return c.state }
 
-// HandshakeReady reports whether locked was acknowledged and every known
-// output has committed a first frame.
+// HandshakeReady reads only the synchronized protocol phase.
 func (c *Client) HandshakeReady() bool { return c.state.HandshakeReady() }
 
 // Repaint schedules a fresh frame commit for every output that already has
 // one, on the pump goroutine. Keystrokes and clock ticks route through this.
-func (c *Client) Repaint() {
-	c.Post(func() {
-		for _, out := range c.outputs {
-			if out.committed && out.w > 0 && out.h > 0 {
-				if err := c.commitFrame(out, out.w, out.h); err != nil {
-					c.failUI(err)
-				}
-			}
+func (c *Client) Repaint() { c.Post(c.repaintOwner) }
+func (c *Client) repaintOwner() {
+	for _, out := range c.outputs {
+		if out.w > 0 && out.h > 0 {
+			out.pending = true
+			c.paint(out)
 		}
-	})
+	}
+	if c.OnDeadline != nil {
+		c.deadline = c.OnDeadline(time.Now())
+	}
+}
+
+// Close releases an acquisition that failed before Run could start.
+func (c *Client) Close() { c.close() }
+
+func (c *Client) scaleFallback(err error) {
+	fmt.Fprintf(os.Stderr, "sysc-lock: fractional scale unavailable: %v\n", err)
+	c.uiError = "Using integer output scaling"
+	c.publish()
 }

@@ -2,13 +2,16 @@ package render
 
 import (
 	"bytes"
+	"golang.org/x/sys/unix"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestExactSizeAndFill(t *testing.T) {
@@ -18,7 +21,7 @@ func TestExactSizeAndFill(t *testing.T) {
 	}
 	fb.Fill(color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xFF})
 	for _, off := range []int{0, (1*3 + 2) * 4} {
-		if got := fb.Pix[off : off+4]; got[0] != 0x11 || got[3] != 0xFF {
+		if got := fb.Pix[off : off+4]; got[2] != 0x11 || got[3] != 0xFF {
 			t.Fatalf("pixel at %d = %v", off, got)
 		}
 	}
@@ -62,7 +65,7 @@ func TestBackgroundCoverCenterCrop(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Cover = 10x5 (scale 0.5); crop window x[2..7): left pixels red, x=4 → big x=6 → src right half → black.
-	if got := fb.Pix[0:4]; !bytes.Equal(got, []byte{255, 0, 0, 255}) {
+	if got := fb.Pix[0:4]; !bytes.Equal(got, []byte{0, 0, 255, 255}) {
 		t.Fatalf("top-left = %v, want red", got)
 	}
 	if got := fb.Pix[4*4 : 4*4+4]; !bytes.Equal(got, []byte{0, 0, 0, 255}) {
@@ -88,7 +91,67 @@ func TestBackgroundCoverCenterCrop(t *testing.T) {
 	if err := fb2.Background(jp, color.NRGBA{A: 255}); err != nil {
 		t.Fatal(err)
 	}
-	if fb2.Pix[0] < 150 {
-		t.Fatalf("jpeg decode failed, pix[0]=%d", fb2.Pix[0])
+	if fb2.Pix[2] < 150 {
+		t.Fatalf("jpeg decode failed, pix[2]=%d", fb2.Pix[2])
+	}
+}
+
+func TestFramebufferBGRA(t *testing.T) {
+	fb := New(1, 1)
+	fb.Fill(color.NRGBA{R: 1, G: 2, B: 3, A: 255})
+	want := [4]byte{3, 2, 1, 255}
+	for i, b := range want {
+		if fb.Pix[i] != b {
+			t.Fatalf("pixel byte %d = %d, want %d", i, fb.Pix[i], b)
+		}
+	}
+}
+
+func TestWallpaperRejectsFIFOWithoutWaiting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wallpaper.fifo")
+	if err := unix.Mkfifo(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- New(2, 2).Background(path, color.NRGBA{A: 255}) }()
+	// Release an old blocking open if the check fails, keeping the test leak-free.
+	defer func() {
+		fd, _ := unix.Open(path, unix.O_RDWR|unix.O_NONBLOCK, 0)
+		if fd >= 0 {
+			unix.Close(fd)
+		}
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("accepted FIFO")
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("FIFO blocked framebuffer asset decode")
+	}
+}
+func TestWallpaperDecodedPixelCeiling(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oversize.png")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = png.Encode(f, image.NewGray(image.Rect(0, 0, 4001, 1000)))
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = New(2, 2).Background(path, color.NRGBA{A: 255}); err == nil {
+		t.Fatal("accepted more than four million wallpaper pixels")
+	}
+}
+
+func TestWallpaperEncodedAllocationHasExactCeiling(t *testing.T) {
+	source, err := os.ReadFile("framebuffer.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(source), "io.ReadAll") {
+		t.Fatal("growing encoded allocation exceeds reserved decode peak")
 	}
 }

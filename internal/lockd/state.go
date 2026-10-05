@@ -26,6 +26,7 @@ const (
 var (
 	ErrInvalidTransition = errors.New("lockd: invalid phase transition")
 	ErrInvalidUnlock     = errors.New("lockd: unlock before locked")
+	ErrUnlockDeferred    = errors.New("Unlock deferred until resume")
 	ErrDuplicateOutput   = errors.New("lockd: output already registered")
 	ErrWrongSize         = errors.New("lockd: committed size differs from configure")
 	ErrNotAcked          = errors.New("lockd: commit before ack-configure")
@@ -196,10 +197,11 @@ func (s *State) FinishedDestructor() string {
 
 // Snapshot contains no owner-mutated maps or protocol objects.
 type Snapshot struct {
-	Sequence uint64
-	Phase    Phase
-	UIReady  bool
-	UIError  string
+	Sequence   uint64
+	Phase      Phase
+	UIReady    bool
+	UIError    string
+	Background string
 }
 
 func (s *State) Snapshot() Snapshot {
@@ -219,10 +221,14 @@ func (s *State) RemoveOutput(id OutputID) {
 	s.sequence++
 }
 
-// CompleteUnlock confirms transport completion before publishing Done.
-func (s *State) CompleteUnlock(request, sync func() error) error {
+// CompleteUnlock publishes Unlocking through begun before starting transport.
+// It enters Done only after both protocol request and sync confirmation.
+func (s *State) CompleteUnlock(request, sync func() error, begun func()) error {
 	if err := s.Unlock(); err != nil {
 		return err
+	}
+	if begun != nil {
+		begun()
 	}
 	if err := request(); err != nil {
 		return err
@@ -231,4 +237,20 @@ func (s *State) CompleteUnlock(request, sync func() error) error {
 		return err
 	}
 	return s.Done()
+}
+
+func (s *State) Resize(id OutputID, w, h uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	o, ok := s.outputs[id]
+	if !ok {
+		return ErrUnknownOutput
+	}
+	if !o.Acked {
+		return ErrNotAcked
+	}
+	o.Width, o.Height = w, h
+	o.Ready = false
+	s.sequence++
+	return nil
 }

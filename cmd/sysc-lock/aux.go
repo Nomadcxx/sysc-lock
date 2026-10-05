@@ -38,16 +38,6 @@ func palettePath() string {
 	return filepath.Join(home, ".config", "sysc-shell", "palette.json")
 }
 
-// watchSignals: SIGTERM/SIGINT are legal to honor only before the compositor
-// confirms "locked" (abandon request, exit 3). After confirmation they are
-// ignored — the session is sealed and must stay sealed; authentication is the
-// only exit.
-func watchSignals(sigs chan os.Signal, c *lockd.Client, release func()) {
-	for range sigs {
-		c.Post(func() { c.AbortBeforeLocked() })
-	}
-}
-
 const lockedHandshakeLine = "sysc-lock: locked"
 
 func emitLockedHandshake(w io.Writer) {
@@ -60,8 +50,8 @@ type enterGate struct {
 	generation uint64
 }
 
-func (g *enterGate) try(pass string) bool {
-	if g.busy || pass == "" {
+func (g *enterGate) try(hasEntry bool) bool {
+	if g.busy || !hasEntry {
 		return false
 	}
 	g.busy = true
@@ -71,25 +61,13 @@ func (g *enterGate) try(pass string) bool {
 
 func (g *enterGate) release() { g.busy = false }
 
-// watchLocked installs an owner callback; the protocol event is the handshake.
-func watchLocked(c *lockd.Client, release func()) {
-	emitted := false
-	c.OnEvent = func(v lockd.Snapshot) {
-		if v.Phase == lockd.Locked && !emitted {
-			emitted = true
-			emitLockedHandshake(os.Stdout)
-			release()
-		}
-	}
-}
-
 func (g *enterGate) handle(m *input.Model, k lockd.Key) (bool, error) {
 	if g.busy {
 		return false, nil
 	}
 	switch {
 	case k.Enter:
-		return g.try(m.Password()), nil
+		return g.try(len(m.Pass) > 0), nil
 	case k.Backspace:
 		m.Backspace()
 	case k.Escape:
