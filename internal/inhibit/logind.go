@@ -59,7 +59,7 @@ func (l *Logind) SleepDelayLimit() (time.Duration, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var value dbus.Variant
-	if err := l.conn.Object("org.freedesktop.login1", "/org/freedesktop/login1").CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, "org.freedesktop.login1.Manager", "InhibitDelayMaxUS").Store(&value); err != nil {
+	if err := l.conn.Object("org.freedesktop.login1", "/org/freedesktop/login1").CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, "org.freedesktop.login1.Manager", "InhibitDelayMaxUSec").Store(&value); err != nil {
 		return 0, err
 	}
 	us, ok := value.Value().(uint64)
