@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
+	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"os"
 	"os/user"
 	"strconv"
@@ -136,5 +137,86 @@ func TestEscapeDuringVerificationKeepsEntry(t *testing.T) {
 	g.press(m, &r, lockd.Key{Escape: true}, now.Add(time.Second))
 	if m.Password() != "secret" || !r.Tick(now.Add(time.Second), true) {
 		t.Fatal("verification must not be interrupted by Esc")
+	}
+}
+
+func TestPopupKeysNeverReachThePasswordBuffer(t *testing.T) {
+	m := power.New(power.DefaultOrder, power.Availability{Reboot: true, Shutdown: true}, "c2")
+	m.Press(power.Key{F4: true}, time.Now())
+	model := &input.Model{}
+	model.Append("secret")
+	gate := &enterGate{}
+	r := &input.Reveal{}
+	r.Show(time.Now())
+	for _, k := range []lockd.Key{
+		{Text: "x"}, {Backspace: true}, {Up: true}, {Down: true}, {Enter: true},
+		{Enter: true, Released: true}, {F4: true},
+	} {
+		submit, err := gate.pressMenu(model, r, powerKeys(k), m, time.Now())
+		if submit || err != nil {
+			t.Fatalf("a popup key submitted the entry: %v %v", submit, err)
+		}
+		if string(model.Pass) != "secret" {
+			t.Fatalf("the buffer changed on %+v: %q", k, model.Pass)
+		}
+	}
+	if !r.Tick(time.Now(), false) {
+		t.Fatal("the entry must stay visible while the popup is open")
+	}
+}
+
+func TestEscapeWithThePopupOpenKeepsTheEntry(t *testing.T) {
+	m := power.New(power.DefaultOrder, power.Availability{Reboot: true, Shutdown: true}, "c2")
+	m.Press(power.Key{F4: true}, time.Now())
+	model := &input.Model{}
+	gate := &enterGate{}
+	r := &input.Reveal{}
+	now := time.Now()
+	r.Show(now)
+	if _, err := gate.pressMenu(model, r, power.Key{Escape: true}, m, now); err != nil {
+		t.Fatal(err)
+	}
+	if m.Open() {
+		t.Fatal("escape closes the popup")
+	}
+	if !r.Tick(now, false) {
+		t.Fatal("escape with the popup open must not hide the entry")
+	}
+}
+
+func TestPopupIsInertWhileVerifying(t *testing.T) {
+	m := power.New(power.DefaultOrder, power.Availability{Reboot: true, Shutdown: true}, "c2")
+	gate := &enterGate{busy: true}
+	r := &input.Reveal{}
+	if submit, err := gate.pressMenu(&input.Model{}, r, power.Key{F4: true}, m, time.Now()); submit || err != nil {
+		t.Fatal("F4 is ignored while PAM verifies", submit, err)
+	}
+	if m.Open() {
+		t.Fatal("the popup must not open during verification")
+	}
+}
+
+func TestSubmittingCancelsThePopupAndAnyHold(t *testing.T) {
+	m := power.New(power.DefaultOrder, power.Availability{Reboot: true, Shutdown: true}, "c2")
+	m.Press(power.Key{F4: true}, time.Now())
+	model := &input.Model{}
+	model.Append("secret")
+	gate := &enterGate{}
+	r := &input.Reveal{}
+	r.Show(time.Now())
+	m.Press(power.Key{Enter: true}, time.Now())
+	if !m.Holding() {
+		t.Fatal("the hold must be running before we submit")
+	}
+	m.Close() // what the submit path does
+	submit, err := gate.press(model, r, lockd.Key{Enter: true}, time.Now())
+	if !submit || err != nil {
+		t.Fatal("enter with the popup closed submits", submit, err)
+	}
+	if m.Holding() {
+		t.Fatal("starting a verification cancels the hold")
+	}
+	if a := m.Tick(time.Now().Add(time.Hour)); a != "" {
+		t.Fatal("a cancelled hold can never fire", a)
 	}
 }

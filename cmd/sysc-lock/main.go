@@ -12,8 +12,10 @@ import (
 
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/config"
+	"github.com/Nomadcxx/sysc-lock/internal/inhibit"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
+	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
 )
@@ -77,9 +79,11 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	gate := &enterGate{}
 
 	st := lockd.New()
+	sessionID := os.Getenv("XDG_SESSION_ID")
+	menu := power.New(nil, power.Availability{}, sessionID)
+	executor := power.Executor{Session: sessionID}
 	var client *lockd.Client
 	client, err = lockd.Connect(st, func(k lockd.Key) {
-		// Runs on the pump goroutine — sole mutator of model/view.
 		view.Caps = k.CapsLock
 		view.Layout = k.Layout
 		view.Num = k.NumLock
@@ -87,11 +91,31 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			client.Repaint()
 			return
 		}
-		submit, editErr := gate.press(model, &view.Reveal, k, time.Now())
+		now := time.Now()
+		if view.Powering != "" {
+			client.Repaint()
+			return
+		}
+		if gate.busy {
+			client.Repaint()
+			return
+		}
+		if !gate.visible(model, &view.Reveal, now) {
+			gate.press(model, &view.Reveal, k, now)
+			client.Repaint()
+			return
+		}
+		if menu.Open() || k.F4 {
+			gate.pressMenu(model, &view.Reveal, powerKeys(k), menu, now)
+			client.Repaint()
+			return
+		}
+		submit, editErr := gate.press(model, &view.Reveal, k, now)
 		if editErr != nil {
 			view.SetError(editErr.Error(), time.Now())
 		}
 		if submit {
+			menu.Close()
 			view.Busy = true
 			go authenticate(authenticator, model.Password(), client, view, model, gate, gate.generation)
 		}
@@ -99,12 +123,19 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		client.Repaint()
 	}, func(fb *render.Framebuffer, scale float64, background []byte) error {
 		view.Scale = scale
+		now := time.Now()
+		view.Power = powerFrame(menu, now)
+		if menu.Available() {
+			view.Hint = power.ScreenHelp
+		} else {
+			view.Hint = power.ScreenHelpPlain
+		}
 		if background == nil {
-			view.Render(fb, time.Now())
+			view.Render(fb, now)
 		} else {
 			copy(fb.Pix, background)
 			lockd.DimBackground(fb.Pix)
-			view.RenderForeground(fb, time.Now())
+			view.RenderForeground(fb, now)
 		}
 		return nil
 	})
@@ -127,7 +158,29 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	client.OnEvent = report
 	client.BeforeUnlock = beforeUnlock
 	defer client.Close()
-	client.OnDeadline = view.NextDeadline
+	client.OnDeadline = func(now time.Time) time.Time {
+		if a := menu.Tick(now); a != "" {
+			view.Powering = a.Status()
+			go func() {
+				outcome := executor.Run(a)
+				client.Post(func() {
+					switch outcome {
+					case power.OK:
+					case power.Refused:
+						menu.Recover()
+						view.Powering = ""
+						view.SetError("Not permitted", time.Now())
+					default:
+						menu.Recover()
+						view.Powering = ""
+						view.SetError("Failed", time.Now())
+					}
+					client.Repaint()
+				})
+			}()
+		}
+		return view.NextDeadline(now)
+	}
 	cfg, configErr := config.Load(config.Path())
 	if configErr != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock: invalid presentation config; using fallback")
@@ -136,6 +189,18 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	}
 	view.StyleName, view.Clock24, view.Reduced = cfg.ClockStyle, cfg.Clock24h, cfg.ReducedMotion
 	client.SetEffectRate(cfg.EffectFPS)
+	if lg, lgErr := inhibit.NewLogind(); lgErr == nil {
+		defer lg.Release()
+		caller := power.NewCaller(lg)
+		executor.Caller = caller
+		go func() {
+			avail := power.Check(caller)
+			client.Post(func() {
+				menu = power.New(cfg.PowerActions, avail, sessionID)
+				client.Repaint()
+			})
+		}()
+	}
 	client.EnableBackground(cfg.Effect, cfg.Palette, cfg.ReducedMotion)
 	client.EnableWallpaper(os.Getenv("SYSC_LOCK_WALLPAPER"))
 
@@ -182,4 +247,20 @@ func authenticate(a authenticator, pass string, client *lockd.Client, view *lock
 		client.SetMotionFrozen(false, time.Now())
 		client.Repaint()
 	})
+}
+
+func powerKeys(k lockd.Key) power.Key {
+	return power.Key{Up: k.Up, Down: k.Down, Enter: k.Enter, Escape: k.Escape, F4: k.F4, Released: k.Released}
+}
+
+func powerFrame(m *power.Menu, now time.Time) *lockd.PowerView {
+	if !m.Available() {
+		return nil
+	}
+	rows := m.Items()
+	p := &lockd.PowerView{Open: m.Open(), Title: power.Title, Help: power.Help, Progress: m.Progress(now)}
+	for i, a := range rows {
+		p.Rows = append(p.Rows, lockd.PowerRow{Title: a.Label(), Selected: i == m.Selected()})
+	}
+	return p
 }
