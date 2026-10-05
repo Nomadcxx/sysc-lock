@@ -8,6 +8,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
@@ -76,6 +77,22 @@ func (g *enterGate) handle(m *input.Model, k lockd.Key) (bool, error) {
 		return false, m.Append(k.Text)
 	}
 	return false, nil
+}
+
+// press applies one key to the entry. A key on a hidden entry only reveals it
+// and never reaches the password buffer. Any key restarts the idle timer. Esc
+// clears the field and hides the entry unless a verification is running.
+func (g *enterGate) press(m *input.Model, r *input.Reveal, k lockd.Key, now time.Time) (bool, error) {
+	visible := r.Tick(now, len(m.Pass) > 0 || g.busy)
+	r.Show(now)
+	if !visible {
+		return false, nil
+	}
+	submit, err := g.handle(m, k)
+	if k.Escape && !g.busy {
+		r.Hide()
+	}
+	return submit, err
 }
 func (g *enterGate) accept(generation uint64, phase lockd.Phase) bool {
 	return g.busy && g.generation == generation && phase == lockd.Locked

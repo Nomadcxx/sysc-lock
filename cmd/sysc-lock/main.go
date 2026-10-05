@@ -87,7 +87,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			client.Repaint()
 			return
 		}
-		submit, editErr := gate.handle(model, k)
+		submit, editErr := gate.press(model, &view.Reveal, k, time.Now())
 		if editErr != nil {
 			view.SetError(editErr.Error(), time.Now())
 		}
@@ -103,11 +103,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			view.Render(fb, time.Now())
 		} else {
 			copy(fb.Pix, background)
-			for i := 0; i < len(fb.Pix); i += 4 {
-				fb.Pix[i] /= 3
-				fb.Pix[i+1] /= 3
-				fb.Pix[i+2] /= 3
-			}
+			lockd.DimBackground(fb.Pix)
 			view.RenderForeground(fb, time.Now())
 		}
 		return nil
@@ -138,6 +134,8 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		cfg = config.Default()
 		cfg.ReducedMotion = true
 	}
+	view.StyleName, view.Clock24, view.Reduced = cfg.ClockStyle, cfg.Clock24h, cfg.ReducedMotion
+	client.SetEffectRate(cfg.EffectFPS)
 	client.EnableBackground(cfg.Effect, cfg.Palette, cfg.ReducedMotion)
 	client.EnableWallpaper(os.Getenv("SYSC_LOCK_WALLPAPER"))
 
@@ -179,8 +177,7 @@ func authenticate(a authenticator, pass string, client *lockd.Client, view *lock
 			view.SetErrorTerminal(res.Message, time.Now())
 			view.NoteAttempt(time.Now())
 		default:
-			view.SetError(res.Message, time.Now())
-			view.NoteAttempt(time.Now())
+			view.Reject(res.Message, time.Now())
 		}
 		client.SetMotionFrozen(false, time.Now())
 		client.Repaint()

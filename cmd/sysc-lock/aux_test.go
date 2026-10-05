@@ -8,6 +8,7 @@ import (
 	"os/user"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestEmitLockedHandshakeWritesTheShellLine(t *testing.T) {
@@ -78,5 +79,62 @@ func TestEnterGateRejectsEmptyAndOverlap(t *testing.T) {
 	g.release()
 	if !g.try(true) {
 		t.Fatal("after release, Enter must start auth again")
+	}
+}
+
+func TestHiddenEntryOnlyReveals(t *testing.T) {
+	m := &input.Model{}
+	var r input.Reveal
+	g := &enterGate{}
+	now := time.Unix(100, 0)
+	for _, k := range []lockd.Key{{Text: "x"}, {Enter: true}, {Backspace: true}, {}} {
+		r = input.Reveal{}
+		submit, err := g.press(m, &r, k, now)
+		if submit || err != nil || len(m.Pass) != 0 {
+			t.Fatalf("hidden entry accepted %+v", k)
+		}
+		if !r.Tick(now, false) {
+			t.Fatalf("%+v did not reveal", k)
+		}
+	}
+	if submit, err := g.press(m, &r, lockd.Key{Text: "p"}, now.Add(time.Second)); submit || err != nil || m.Password() != "p" {
+		t.Fatal("the second key must type")
+	}
+}
+
+func TestEscapeWipesAndHides(t *testing.T) {
+	m := &input.Model{}
+	var r input.Reveal
+	g := &enterGate{}
+	now := time.Unix(100, 0)
+	r.Show(now)
+	g.press(m, &r, lockd.Key{Text: "secret"}, now)
+	if m.Password() != "secret" {
+		t.Fatal("setup")
+	}
+	g.press(m, &r, lockd.Key{Escape: true}, now.Add(time.Second))
+	if len(m.Pass) != 0 || r.Tick(now.Add(time.Second), true) {
+		t.Fatal("Esc must clear the field and hide the entry")
+	}
+	for _, c := range m.Pass[:cap(m.Pass)] {
+		if c != 0 {
+			t.Fatal("Esc left password runes in the buffer")
+		}
+	}
+}
+
+func TestEscapeDuringVerificationKeepsEntry(t *testing.T) {
+	m := &input.Model{}
+	m.Append("secret")
+	var r input.Reveal
+	g := &enterGate{}
+	now := time.Unix(100, 0)
+	r.Show(now)
+	if submit, _ := g.press(m, &r, lockd.Key{Enter: true}, now); !submit {
+		t.Fatal("setup")
+	}
+	g.press(m, &r, lockd.Key{Escape: true}, now.Add(time.Second))
+	if m.Password() != "secret" || !r.Tick(now.Add(time.Second), true) {
+		t.Fatal("verification must not be interrupted by Esc")
 	}
 }
