@@ -92,6 +92,69 @@ func TestLockConfigFIFOReadDoesNotBlock(t *testing.T) {
 	}
 }
 
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestPresentationDefaults(t *testing.T) {
+	c := Default()
+	if c.ClockStyle != "kompaktblk" || c.Clock24h || c.EffectFPS != DefaultFPS || DefaultFPS != 20 {
+		t.Fatalf("%+v", c)
+	}
+	got, err := Load(writeConfig(t, `{}`))
+	if err != nil || got != c {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestClockStyleNormalizes(t *testing.T) {
+	for body, want := range map[string]string{
+		`{"clock_style":"phm_blocky_reverse"}`: "phm_blocky_reverse",
+		`{"clock_style":"plain"}`:              "plain",
+		`{"clock_style":"nope"}`:               "kompaktblk",
+		`{"clock_style":""}`:                   "kompaktblk",
+	} {
+		c, err := Load(writeConfig(t, body))
+		if err != nil || c.ClockStyle != want {
+			t.Fatalf("%s: %q %v", body, c.ClockStyle, err)
+		}
+	}
+}
+
+func TestEffectFPSClamps(t *testing.T) {
+	for body, want := range map[string]int{
+		`{"effect_fps":0}`: DefaultFPS, `{"effect_fps":-5}`: MinFPS, `{"effect_fps":1}`: MinFPS,
+		`{"effect_fps":60}`: 60, `{"effect_fps":1000000}`: MaxFPS, `{}`: DefaultFPS,
+	} {
+		c, err := Load(writeConfig(t, body))
+		if err != nil || c.EffectFPS != want {
+			t.Fatalf("%s: %d %v", body, c.EffectFPS, err)
+		}
+	}
+	if _, err := Load(writeConfig(t, `{"effect_fps":"fast"}`)); err == nil {
+		t.Fatal("a non-number rate must be rejected")
+	}
+}
+
+func TestClock24hRoundTrips(t *testing.T) {
+	p := writeConfig(t, `{"clock_24h":true}`)
+	c, err := Load(p)
+	if err != nil || !c.Clock24h {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if err = Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := Load(p); err != nil || again != c {
+		t.Fatalf("%+v %v", again, err)
+	}
+}
+
 func TestLockConfigSaveBudgetIncludesNewline(t *testing.T) {
 	for _, delta := range []int{-1, 0} {
 		t.Run(strconv.Itoa(delta), func(t *testing.T) {

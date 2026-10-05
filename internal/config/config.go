@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"github.com/Nomadcxx/sysc-terminal/renderer"
 	"io"
+
+	"github.com/Nomadcxx/sysc-lock/internal/art"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -14,13 +16,26 @@ import (
 
 const MaxBytes = 64 << 10
 
+const (
+	MinFPS     = 10
+	MaxFPS     = 120
+	DefaultFPS = 20
+)
+
 type Config struct {
 	Effect        string `json:"effect"`
 	Palette       string `json:"palette"`
 	ReducedMotion bool   `json:"reduced_motion"`
+	ClockStyle    string `json:"clock_style"`
+	Clock24h      bool   `json:"clock_24h"`
+	// EffectFPS is effect ticks per second. The effects advance one fixed step
+	// per tick, so it also scales animation speed.
+	EffectFPS int `json:"effect_fps"`
 }
 
-func Default() Config { return Config{Effect: "rain", Palette: "nord"} }
+func Default() Config {
+	return Config{Effect: "rain", Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS}
+}
 func Path() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -74,6 +89,13 @@ func Load(path string) (Config, error) {
 	data, _ := json.Marshal(fields)
 	if err = json.Unmarshal(data, &c); err != nil {
 		return c, err
+	}
+	c.ClockStyle = art.Lookup(c.ClockStyle).Name
+	switch {
+	case fields["effect_fps"] == nil || c.EffectFPS == 0:
+		c.EffectFPS = DefaultFPS
+	default:
+		c.EffectFPS = max(MinFPS, min(MaxFPS, c.EffectFPS))
 	}
 	return c, renderer.Validate(c.Effect, c.Palette)
 }
