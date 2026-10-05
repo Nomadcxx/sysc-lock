@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Nomadcxx/sysc-lock/internal/power"
 )
 
 func TestLockConfigPreservesUnknownFields(t *testing.T) {
@@ -107,7 +110,7 @@ func TestPresentationDefaults(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 	got, err := Load(writeConfig(t, `{}`))
-	if err != nil || got != c {
+	if err != nil || !reflect.DeepEqual(got, c) {
 		t.Fatalf("%+v %v", got, err)
 	}
 }
@@ -150,7 +153,7 @@ func TestClock24hRoundTrips(t *testing.T) {
 	if err = Save(p, c); err != nil {
 		t.Fatal(err)
 	}
-	if again, err := Load(p); err != nil || again != c {
+	if again, err := Load(p); err != nil || !reflect.DeepEqual(again, c) {
 		t.Fatalf("%+v %v", again, err)
 	}
 }
@@ -193,5 +196,55 @@ func TestLockConfigSaveBudgetIncludesNewline(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPowerActionsDefaultAndNormalize(t *testing.T) {
+	d := Default()
+	if len(d.PowerActions) != 3 || d.PowerActions[0] != power.Logout || d.PowerActions[1] != power.Reboot || d.PowerActions[2] != power.Shutdown {
+		t.Fatalf("default order %v", d.PowerActions)
+	}
+	got, err := Load(writeConfig(t, `{"power_actions":["shutdown","nope","logout","shutdown"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PowerActions) != 2 || got.PowerActions[0] != power.Shutdown || got.PowerActions[1] != power.Logout {
+		t.Fatalf("unknown and duplicate names are dropped, order kept: %v", got.PowerActions)
+	}
+}
+
+func TestPowerActionsEmptyListRemovesTheMenu(t *testing.T) {
+	got, err := Load(writeConfig(t, `{"power_actions":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PowerActions) != 0 {
+		t.Fatalf("an empty list is not the default: %v", got.PowerActions)
+	}
+}
+
+func TestPowerActionsAbsentKeepsTheDefault(t *testing.T) {
+	got, err := Load(writeConfig(t, `{"effect":"rain"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PowerActions) != 3 {
+		t.Fatalf("an absent key keeps the default: %v", got.PowerActions)
+	}
+}
+
+func TestPowerActionsRoundTrip(t *testing.T) {
+	path := writeConfig(t, `{}`)
+	c := Default()
+	c.PowerActions = []power.Action{power.Shutdown, power.Logout}
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PowerActions) != 2 || got.PowerActions[0] != power.Shutdown {
+		t.Fatalf("round trip %v", got.PowerActions)
 	}
 }

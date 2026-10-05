@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"github.com/Nomadcxx/sysc-lock/internal/art"
+	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -31,10 +32,13 @@ type Config struct {
 	// EffectFPS is effect ticks per second. The effects advance one fixed step
 	// per tick, so it also scales animation speed.
 	EffectFPS int `json:"effect_fps"`
+	// PowerActions is the ordered Power Options menu. An empty list removes
+	// the menu, the F4 hint and the help-line mention.
+	PowerActions []power.Action `json:"power_actions"`
 }
 
 func Default() Config {
-	return Config{Effect: "rain", Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS}
+	return Config{Effect: "rain", Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS, PowerActions: append([]power.Action{}, power.DefaultOrder...)}
 }
 func Path() string {
 	dir, err := os.UserConfigDir()
@@ -97,6 +101,7 @@ func Load(path string) (Config, error) {
 	default:
 		c.EffectFPS = max(MinFPS, min(MaxFPS, c.EffectFPS))
 	}
+	c.PowerActions = power.Normalize(c.PowerActions)
 	return c, renderer.Validate(c.Effect, c.Palette)
 }
 func Save(path string, c Config) error {
