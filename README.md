@@ -1,58 +1,12 @@
-<p align="center"><img src="assets/wordmark.png" alt="sysc-lock" height="120"></p>
+![sysc-lock](assets/wordmark.png)
 
-<p align="center"><strong>A session locker for Wayland, written in Go.</strong></p>
+A Wayland session locker for sysc-shell, with compositor-enforced locking and in-process
+PAM authentication.
 
-<p align="center">Locks the session with <code>ext-session-lock-v1</code> and authenticates with PAM. The compositor enforces the input seal; there is no IPC unlock and no bypass.</p>
+## Quick Links
 
-## What it is
-
-sysc-lock is the session locker behind [sysc-shell](https://github.com/Nomadcxx/sysc-shell). It
-asks the compositor for a session lock, draws a lock screen on every output, and authenticates you
-with PAM in-process. While locked, the compositor refuses input to every other client — that seal
-is the security boundary, not the lock screen itself.
-
-## How it fits together
-
-```mermaid
-flowchart LR
-    greet["sysc-greet<br/>graphical greeter"] -->|starts configured session| shell["sysc-shell<br/>desktop shell"]
-
-    subgraph session["Session"]
-        lock["sysc-lock<br/>session locker"]
-    end
-
-    subgraph daemons["Companion daemons"]
-        notify["sysc-notify<br/>notifications"]
-        clipboard["sysc-clipboard<br/>clipboard history"]
-        tray["sysc-tray<br/>system tray"]
-    end
-
-    subgraph wallpaper["Wallpaper and idle"]
-        gslapper["gSlapper<br/>video wallpaper"]
-        terminal["sysc-terminal<br/>terminal effects"]
-        walls["sysc-walls<br/>idle screensaver"]
-    end
-
-    subgraph libs["Shared Go libraries"]
-        wayland["sysc-wayland<br/>Wayland transport"]
-        launch["sysc-launch<br/>app launcher"]
-        metrics["sysc-metrics<br/>system telemetry"]
-    end
-
-    plugins["sysc-plugins<br/>plugin source"]
-
-    shell -->|spawns| session
-    shell -->|connects to| daemons
-    shell -->|drives| wallpaper
-    shell -->|links| libs
-    shell -->|installs from| plugins
-
-    classDef current fill:#7aa2f7,stroke:#1a1b26,color:#1a1b26,stroke-width:2px
-    class lock current
-```
-
-[The sysc ecosystem](https://github.com/Nomadcxx/sysc-shell/blob/main/docs/ecosystem.md) explains
-each connection, socket and version pin.
+- [Documentation](#documentation)
+- [The sysc ecosystem](https://github.com/Nomadcxx/sysc-shell/blob/main/docs/ecosystem.md)
 
 ## Security model
 
@@ -65,17 +19,7 @@ each connection, socket and version pin.
 - Before requesting the lock, sysc-lock takes a logind sleep inhibitor. It releases the inhibitor
   after the locked handshake, or if locking fails or is cancelled before acquisition.
 
-## Features
-
-- `ext-session-lock-v1`; fails cleanly if the compositor doesn't expose it
-- PAM `login` service, authenticate plus account management
-- Wallpaper (PNG or JPEG, scale-to-cover) or a palette colour fallback
-- Palette read from sysc-shell's `palette.json` (dark variant)
-- Clock, `user@host`, masked entry, Caps Lock warning and failed-attempt counter
-- Ordinary errors clear after four seconds; terminal PAM errors persist
-- Exit codes and a stdout handshake that sysc-shell uses to track the lock
-
-## Install
+## Installation
 
 ### Requirements
 
@@ -120,11 +64,64 @@ before using this configuration:
 { "session": { "locker": "sysc-lock" } }
 ```
 
+## Lock screen
+
+- `ext-session-lock-v1`; fails cleanly if the compositor doesn't expose it
+- PAM `login` service, authenticate plus account management
+- Wallpaper (PNG or JPEG, scale-to-cover) or a palette colour fallback
+- Palette read from sysc-shell's `palette.json` (dark variant)
+- Clock, `user@host`, masked entry, Caps Lock warning and failed-attempt counter
+- Ordinary errors clear after four seconds; terminal PAM errors persist
+- Exit codes and a stdout handshake that sysc-shell uses to track the lock
+
 ## Development
 
 ```bash
 go test -race ./...
 ```
+
+## Ecosystem
+
+```mermaid
+flowchart LR
+    greet["sysc-greet<br/>graphical greeter"] -->|starts configured session| shell["sysc-shell<br/>desktop shell"]
+
+    subgraph session["Session"]
+        lock["sysc-lock<br/>session locker"]
+    end
+
+    subgraph daemons["Companion daemons"]
+        notify["sysc-notify<br/>notifications"]
+        clipboard["sysc-clipboard<br/>clipboard history"]
+        tray["sysc-tray<br/>system tray"]
+    end
+
+    subgraph wallpaper["Wallpaper and idle"]
+        gslapper["gSlapper<br/>video wallpaper"]
+        terminal["sysc-terminal<br/>terminal effects"]
+        walls["sysc-walls<br/>idle screensaver"]
+    end
+
+    subgraph libs["Shared Go libraries"]
+        wayland["sysc-wayland<br/>Wayland transport"]
+        launch["sysc-launch<br/>app launcher"]
+        metrics["sysc-metrics<br/>system telemetry"]
+    end
+
+    plugins["sysc-plugins<br/>plugin source"]
+
+    shell -->|spawns| session
+    shell -->|connects to| daemons
+    shell -->|drives| wallpaper
+    shell -->|links| libs
+    shell -->|installs from| plugins
+
+    classDef current fill:#7aa2f7,stroke:#1a1b26,color:#1a1b26,stroke-width:2px
+    class lock current
+```
+
+[The sysc ecosystem](https://github.com/Nomadcxx/sysc-shell/blob/main/docs/ecosystem.md) explains
+each connection, socket and version pin.
 
 ## Documentation
 
