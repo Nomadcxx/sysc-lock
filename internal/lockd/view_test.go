@@ -270,6 +270,11 @@ func TestSceneStaysInsideItsBounds(t *testing.T) {
 		v.Entry = &input.Model{}
 		v.Entry.Append(strings.Repeat("a", 200))
 		v.Reveal.Show(now)
+		v.Hint = "F4 Power • Enter Unlock"
+		v.Power = &PowerView{
+			Open: true, Title: "Power Options", Progress: 40, Help: "help",
+			Rows: []PowerRow{{Title: "Log out"}, {Title: "Reboot", Selected: true}, {Title: "Cancel"}},
+		}
 		v.SetErrorTerminal(strings.Repeat("error", 40), now)
 		fb := render.New(size[0], size[1])
 		v.Render(fb, now)
@@ -289,5 +294,179 @@ func TestDimBackgroundKeepsAlpha(t *testing.T) {
 	DimBackground(pix)
 	if !reflect.DeepEqual(pix, []byte{100, 50, 25, 255, 127, 127, 127, 255}) {
 		t.Fatal(pix)
+	}
+}
+
+func TestMutedRoleMeetsTheHelpLineContrastFloor(t *testing.T) {
+	worst := luminance(panelGround)
+	a, b := luminance(panelMuted), worst
+	if ratio := (max(a, b) + .05) / (min(a, b) + .05); ratio < 4.5 {
+		t.Fatalf("help ink %.2f:1 below the 4.5:1 floor", ratio)
+	}
+}
+
+func TestHintStripAppearsWithTheEntryAndTheTextMatchesAvailability(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	v := NewView(theme.Default(), "u", "h")
+	v.Reduced = true
+	v.Reveal.Show(now)
+	v.Hint = "Enter Unlock"
+	s := Layout(960, 720, 1, "", v.clockText(now))
+	if s.Help.Empty() {
+		t.Skip("this output has no room for a hint strip")
+	}
+	fb := render.New(960, 720)
+	fb.Fill(v.Pal.Surface)
+	v.RenderForeground(fb, now)
+	if color.NRGBAModel.Convert(fb.At(s.Help.Min.X+1, s.Help.Min.Y+1)).(color.NRGBA) != panelGround {
+		t.Fatal("the hint strip needs a solid backing over the effect")
+	}
+	v.Hint = "F4 Power • Enter Unlock"
+	fb = render.New(960, 720)
+	fb.Fill(v.Pal.Surface)
+	v.RenderForeground(fb, now)
+	hidden := NewView(theme.Default(), "u", "h")
+	hidden.Reduced = true
+	hidden.Reveal.Show(now)
+	hidden.Hint = "Enter Unlock"
+	fb2 := render.New(960, 720)
+	fb2.Fill(hidden.Pal.Surface)
+	hidden.RenderForeground(fb2, now)
+	if reflect.DeepEqual(fb.Pix, fb2.Pix) {
+		t.Fatal("F4 must be mentioned when an action is available")
+	}
+}
+
+func TestPopupUsesDangerForItsFrameTitleAndSelectedRow(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	v := NewView(theme.Default(), "u", "h")
+	v.Reduced = true
+	v.Entry = &input.Model{}
+	v.Reveal.Show(now)
+	v.Power = &PowerView{
+		Open:     true,
+		Title:    "Power Options",
+		Help:     "help",
+		Progress: -1,
+		Rows:     []PowerRow{{Title: "Log out"}, {Title: "Reboot", Selected: true}, {Title: "Cancel"}},
+	}
+	fb := render.New(960, 720)
+	v.Render(fb, now)
+	s := Layout(960, 720, 1, "", v.clockText(now))
+	px := func(p image.Point) color.NRGBA { return color.NRGBAModel.Convert(fb.At(p.X, p.Y)).(color.NRGBA) }
+	if got := px(image.Pt(s.Menu.Min.X, s.Menu.Min.Y)); got != panelDanger {
+		t.Fatalf("frame must be danger ink, got %v", got)
+	}
+	counts := map[color.NRGBA]int{}
+	for x := s.Menu.Min.X; x < s.Menu.Max.X; x++ {
+		for y := s.Menu.Min.Y + 2; y < s.Menu.Max.Y; y++ {
+			counts[px(image.Pt(x, y))]++
+		}
+	}
+	if counts[panelDanger] < 500 {
+		t.Fatalf("the selected row must be a danger bar, counted %v", counts[panelDanger])
+	}
+	if counts[panelGround] == 0 {
+		t.Fatal("the popup must sit on its own solid ground")
+	}
+}
+
+func TestHoldBarFillsAsTheHoldRuns(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	count := func(p int) int {
+		v := NewView(theme.Default(), "u", "h")
+		v.Reduced = true
+		v.Entry = &input.Model{}
+		v.Reveal.Show(now)
+		v.Power = &PowerView{
+			Open: true, Title: "Power Options", Help: "help", Progress: p,
+			Rows: []PowerRow{{Title: "Log out", Selected: true}},
+		}
+		fb := render.New(960, 720)
+		v.Render(fb, now)
+		s := Layout(960, 720, 1, "", v.clockText(now))
+		n := 0
+		for x := s.Menu.Min.X; x < s.Menu.Max.X; x++ {
+			for y := s.Menu.Min.Y + s.Menu.Dy()/2; y < s.Menu.Max.Y-2; y++ {
+				if color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA) == panelDanger {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	empty, full := count(0), count(100)
+	if full <= empty {
+		t.Fatalf("the bar must grow: empty %d full %d", empty, full)
+	}
+}
+
+func TestPopupAndHintStayInsideEveryOutput(t *testing.T) {
+	for _, size := range [][2]int{{320, 240}, {420, 480}, {960, 720}, {1920, 1080}, {3440, 1440}} {
+		for _, style := range []string{"kompaktblk", "phm_blocky_reverse", "plain"} {
+			now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+			v := NewView(theme.Default(), "Sample Account", "example")
+			v.Reduced = true
+			v.StyleName = style
+			v.Entry = &input.Model{}
+			v.Reveal.Show(now)
+			v.Hint = "F4 Power • Enter Unlock"
+			v.Power = &PowerView{
+				Open: true, Title: "Power Options", Progress: 40,
+				Help: "↑↓ Navigate • Enter Select • Esc Cancel",
+				Rows: []PowerRow{{Title: "Log out"}, {Title: "Reboot", Selected: true}, {Title: "Shutdown"}, {Title: "Cancel"}},
+			}
+			fb := render.New(size[0], size[1])
+			v.Render(fb, now)
+			fbRect := image.Rect(0, 0, size[0], size[1])
+			s := Layout(size[0], size[1], 1, style, v.clockText(now))
+			if s.Menu.Empty() || !s.Menu.In(fbRect) {
+				t.Fatalf("%v %s: popup %v", size, style, s.Menu)
+			}
+			if !s.Help.Empty() && !s.Help.In(fbRect) {
+				t.Fatalf("%v %s: hint %v", size, style, s.Help)
+			}
+		}
+	}
+}
+
+func TestOpenPopupKeepsTheEntryVisiblePastIdle(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	v := NewView(theme.Default(), "u", "h")
+	v.Reduced = true
+	v.Reveal.Show(now)
+	v.Power = &PowerView{Open: true}
+	if !v.EntryVisible(now.Add(input.HideAfter + time.Second)) {
+		t.Fatal("an open popup must keep the entry from hiding")
+	}
+}
+
+func TestPoweringHoldsTheStatusLine(t *testing.T) {
+	now := time.Now()
+	const status = "Rebooting..."
+	v := NewView(theme.Default(), "u", "h")
+	v.Powering = status
+	if v.StatusLine(now) != status {
+		t.Fatalf("status %q", v.StatusLine(now))
+	}
+	if v.StatusLine(now.Add(time.Hour)) != status {
+		t.Fatal("the action status must not expire")
+	}
+	v.Busy = true
+	if v.StatusLine(now) != status {
+		t.Fatal("the action status wins over the verification label")
+	}
+}
+
+func TestHoldingShortensTheRepaintDeadline(t *testing.T) {
+	now := time.Now()
+	v := NewView(theme.Default(), "u", "h")
+	v.Power = &PowerView{Progress: -1}
+	if got := v.NextDeadline(now); got.Sub(now) > time.Second {
+		t.Fatal("no hold means no short deadline", got.Sub(now))
+	}
+	v.Power = &PowerView{Progress: 30}
+	if got := v.NextDeadline(now); got.Sub(now) > 40*time.Millisecond {
+		t.Fatal("the bar must repaint on the print-reveal deadline", got.Sub(now))
 	}
 }

@@ -32,6 +32,13 @@ type View struct {
 	StyleName  string // clock style; unknown names fall back in art.Pick
 	Clock24    bool
 	Reduced    bool // no print reveal and no jolt
+	// Power is nil when no action is available. Hint is the strip text,
+	// handed in by the owner so this package does not import power.
+	Power *PowerView
+	Hint  string
+	// Powering is the status shown once an action is under way. While it is
+	// set, keys are ignored.
+	Powering string
 
 	errMsg     string
 	errUntil   time.Time
@@ -68,11 +75,15 @@ func (v *View) Reject(msg string, now time.Time) {
 // EntryVisible reports whether the entry is shown at now. Text in the field or
 // a running verification keeps it up.
 func (v *View) EntryVisible(now time.Time) bool {
-	return v.Reveal.Tick(now, v.Busy || (v.Entry != nil && len(v.Entry.Pass) > 0))
+	open := v.Power != nil && v.Power.Open
+	return v.Reveal.Tick(now, v.Busy || v.Powering != "" || open || (v.Entry != nil && len(v.Entry.Pass) > 0))
 }
 
 // StatusLine is the visible error text at now (empty after the 4s window).
 func (v *View) StatusLine(now time.Time) string {
+	if v.Powering != "" {
+		return v.Powering
+	}
 	if v.Busy {
 		return "Checking…"
 	}
@@ -113,6 +124,9 @@ func (v *View) NextDeadline(now time.Time) time.Time {
 		if !v.joltStart.IsZero() && now.Sub(v.joltStart) < art.JoltDuration {
 			consider(now.Add(40 * time.Millisecond))
 		}
+	}
+	if v.Power != nil && v.Power.Progress >= 0 {
+		consider(now.Add(33 * time.Millisecond))
 	}
 	return next
 }
@@ -207,6 +221,12 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	}
 	line := shift(s.Status)
 	drawTextBox(fb, line, line.Min.Y+line.Dy()*3/4, status, v.textPx(line.Dy()*3/5, line), ink)
+	if visible {
+		v.drawHint(fb, s)
+	}
+	if v.Power != nil && v.Power.Open {
+		v.drawPopup(fb, s, *v.Power)
+	}
 }
 
 func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectangle, scale float64) {
@@ -236,6 +256,70 @@ func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectang
 	drawTextBox(fb, indicators, indicators.Min.Y+indicators.Dy()*3/4, strings.Join(parts, " · "), v.textPx(indicators.Dy()*3/5, indicators), panelInk)
 }
 
+func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
+	if s.Help.Empty() {
+		return
+	}
+	fillRect(fb, s.Help, panelGround)
+	if v.Hint == "" {
+		return
+	}
+	box := s.Help.Inset(max(1, s.Help.Dy()/6))
+	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Hint, v.textPx(14, box), panelMuted)
+}
+
+func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p PowerView) {
+	box := s.Menu
+	if box.Empty() {
+		return
+	}
+	fillRect(fb, box, panelGround)
+	n := max(1, int(v.Scale))
+	border(fb, box, panelDanger, n)
+	lineH := max(n*3, box.Dy()/8)
+	pad := max(n*2, lineH/3)
+	inner := box.Inset(pad + n)
+	if inner.Dy() <= 0 || inner.Dx() <= 0 {
+		return
+	}
+	px := v.textPx(18, inner)
+	y := inner.Min.Y
+	drawTextBox(fb, inner, y+lineH*3/5, p.Title, px, panelDanger)
+	y += lineH
+	for _, row := range p.Rows {
+		if y+lineH > inner.Max.Y {
+			break
+		}
+		r := image.Rect(inner.Min.X, y, inner.Max.X, y+lineH)
+		ink := panelMuted
+		if row.Selected {
+			fillRect(fb, r, panelDanger)
+			ink = panelGround
+		}
+		drawTextBox(fb, r.Inset(px/2), y+lineH*3/5, row.Title, px, ink)
+		y += lineH
+	}
+	barH := max(2, lineH/4)
+	helpGap := lineH / 3
+	helpH := 0
+	if p.Help != "" {
+		helpH = lineH
+	}
+	barY := inner.Max.Y - barH - helpH - helpGap
+	if barY < y {
+		barY = y
+	}
+	bar := image.Rect(inner.Min.X, barY, inner.Max.X, barY+barH)
+	border(fb, bar, panelMuted, max(1, barH/3))
+	if p.Progress > 0 && bar.Dy() > 0 {
+		fillRect(fb, image.Rect(bar.Min.X, bar.Min.Y, bar.Min.X+bar.Dx()*min(100, p.Progress)/100, bar.Max.Y), panelDanger)
+	}
+	y = barY + barH + helpGap
+	if p.Help != "" && y < inner.Max.Y {
+		drawTextBox(fb, inner, y+lineH/2, p.Help, v.textPx(12, inner), panelMuted)
+	}
+}
+
 func itoa(n int) string { return strconv.Itoa(n) }
 
 func (v *View) Terminal() bool { return v.errTerm }
@@ -247,4 +331,18 @@ var (
 	panelInk    = color.NRGBA{R: 240, G: 244, B: 250, A: 255}
 	panelAccent = color.NRGBA{R: 147, G: 197, B: 253, A: 255}
 	panelDanger = color.NRGBA{R: 255, G: 180, B: 180, A: 255}
+	panelMuted  = color.NRGBA{R: 130, G: 138, B: 150, A: 255} // 5.3:1 on the ground
 )
+
+type PowerView struct {
+	Open     bool
+	Title    string
+	Rows     []PowerRow
+	Help     string
+	Progress int // -1 when no hold is running
+}
+
+type PowerRow struct {
+	Title    string
+	Selected bool
+}
