@@ -45,8 +45,8 @@ func (s Scene) Bounds() image.Rectangle {
 
 // Layout computes the scene for a width by height pixel output. It is a pure
 // function of its arguments. The style steps down to a narrower one, then to
-// plain, rather than overflow; the wordmark is dropped before anything else
-// when the output is too short.
+// plain, rather than overflow; the ambient row drops first when the output is
+// too short, then the hint strip, then the wordmark.
 func Layout(width, height int, scale float64, styleName, clockText string) Scene {
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1

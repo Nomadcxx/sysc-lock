@@ -8,9 +8,11 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
 	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -285,6 +287,31 @@ func TestLoadAmbientGoodFile(t *testing.T) {
 
 func TestKillAmbientNilIsSafe(t *testing.T) {
 	t.Cleanup(killAmbient(nil))
+}
+
+func TestKillAmbientReapsAChildThatIgnoresTerm(t *testing.T) {
+	ready := filepath.Join(t.TempDir(), "ready")
+	cmd := exec.Command("sh", "-c", `trap "" TERM; echo x > "$1"; while true; do sleep 1; done`, "sh", ready)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatal("child never armed the TERM trap")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	start := time.Now()
+	killAmbient(cmd)()
+	if dt := time.Since(start); dt < time.Second || dt > 3*time.Second {
+		t.Fatalf("SIGKILL path took %v, want about 1.5s", dt)
+	}
 }
 
 func TestAmbientRowReadsOncePerSecond(t *testing.T) {

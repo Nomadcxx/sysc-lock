@@ -57,11 +57,18 @@ func Write(path string, s Snapshot) error {
 // Load reads the snapshot, rejecting a missing, oversized, junk, or stale
 // file. Any error means the owner draws no row.
 func Load(path string, now time.Time) (Snapshot, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > MaxBytes {
+		return Snapshot{}, fmt.Errorf("snapshot is not a regular file")
+	}
 	buf := make([]byte, MaxBytes+1)
 	n, err := f.Read(buf)
 	if err != nil {

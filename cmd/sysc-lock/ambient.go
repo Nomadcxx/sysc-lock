@@ -87,6 +87,13 @@ func killAmbient(cmd *exec.Cmd) func() {
 			return
 		}
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-		_ = cmd.Wait()
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case <-done:
+		case <-time.After(1500 * time.Millisecond):
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			<-done
+		}
 	}
 }

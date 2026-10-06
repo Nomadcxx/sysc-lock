@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseWeatherConfigCoords(t *testing.T) {
@@ -50,5 +51,19 @@ func TestFetchTempOversize(t *testing.T) {
 	defer server.Close()
 	if _, err := FetchTemp(server.URL, 0, 0, "celsius"); err == nil {
 		t.Fatal("oversize body must error")
+	}
+}
+
+func TestGetOmitsOnFetchFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := server.URL
+	server.Close()
+	w := &Weather{base: url, unit: "celsius"}
+	now := time.Now()
+	if _, ok := w.Get(now); ok {
+		t.Fatal("a failed fetch must omit weather")
+	}
+	if _, ok := w.Get(now.Add(time.Second)); ok {
+		t.Fatal("a recent failure must not retry")
 	}
 }
