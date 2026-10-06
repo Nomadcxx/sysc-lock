@@ -60,9 +60,9 @@ value uses `kompaktblk`. `effect_fps` is effect ticks per second (10–120); the
 effects advance one fixed step per tick, so it also changes animation speed.
 The screen shows the clock until a key is pressed; that key only reveals the
 password entry. The entry hides again after 8 seconds when empty, or on Esc.
-Ctrl+V or Shift+Insert pastes the seat selection into the field (bounded to 4096 bytes) when
-the compositor offers `text/plain`; a compositor without a data device stays
-keys-only. `power_actions` is the ordered Power Options menu; unknown names
+Ctrl+V or Shift+Insert pastes the seat selection into the field when the
+compositor offers `text/plain` (bounded to 4096 bytes); a compositor without a
+data device stays keys-only. `power_actions` is the ordered Power Options menu; unknown names
 and duplicates are dropped, and an empty list removes the menu and the
 `F4 Power` hint. Names are `logout`, `reboot`, `shutdown`, `suspend` and
 `hibernate`. `F4` opens the popup (a second `F4` resets to the first row;
