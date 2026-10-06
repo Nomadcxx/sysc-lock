@@ -17,6 +17,8 @@ func effectShaders(effect string) (step, draw string, ok bool) {
 		return matrixStepFS, matrixDrawFS, true
 	case "fire":
 		return nullStepFS, fireFS, true
+	case "fireworks":
+		return nullStepFS, fireworksFS, true
 	}
 	return "", "", false
 }
