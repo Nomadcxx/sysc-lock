@@ -103,6 +103,12 @@ var (
 	eglNoSurface = C.gpu_no_surface()
 )
 
+// shaderUniforms is the shared uniform contract of every effect pass.
+// Uniforms a shader does not declare resolve to -1, which GL ignores on set.
+type shaderUniforms struct {
+	uPrev, uTime, uSeed, uGrid, uPalette C.GLint
+}
+
 type gpuBackend struct {
 	effect, palette string
 	pal             []float32
@@ -111,19 +117,35 @@ type gpuBackend struct {
 	ctx     C.EGLContext
 	surface C.EGLSurface
 
-	prog  C.GLuint
-	vbo   C.GLuint
-	loc   C.GLint // uColor
-	aPos  C.GLint
-	fbo   C.GLuint
-	tex   C.GLuint
-	w, h  int
-	ticks int
+	stepProg, drawProg C.GLuint
+	stepU, drawU       shaderUniforms
+	vbo                C.GLuint
+
+	fbo  C.GLuint // draw-pass output, read back into caller memory
+	tex  C.GLuint
+	stex [2]C.GLuint // ping-ponged effect state textures
+	sfbo [2]C.GLuint
+	cur  int
+
+	w, h     int
+	ticks    int
+	stepTime float32
+	seed     int32
 
 	scratch []byte
 
 	threaded bool
 	closed   bool
+}
+
+// effectSeed hashes effect+palette into a small positive int for the shaders.
+// Same inputs, same streaks; the size keeps it exact in any float precision.
+func effectSeed(effect, palette string) int32 {
+	h := uint32(2166136261)
+	for _, c := range effect + "\x00" + palette {
+		h = (h ^ uint32(c)) * 16777619
+	}
+	return int32(h%4093) + 1
 }
 
 func newGpuBackend(effect, palette string, width, height int) (EffectBackend, error) {
@@ -143,7 +165,8 @@ func newGpuBackend(effect, palette string, width, height int) (EffectBackend, er
 	// makeCurrent binds to the OS thread, and Go is free to move this goroutine
 	// onto another one between calls, which would leave GL without a context.
 	runtime.LockOSThread()
-	b := &gpuBackend{effect: effect, palette: palette, pal: pal, threaded: true}
+	b := &gpuBackend{effect: effect, palette: palette, pal: pal,
+		threaded: true, seed: effectSeed(effect, palette)}
 
 	if err := b.init(); err != nil {
 		b.close() // tolerates a half-built state and unpins the thread
@@ -179,12 +202,31 @@ func (b *gpuBackend) init() error {
 	if err = eglMakeCurrent(dpy, b.surface, b.surface, b.ctx); err != nil {
 		return err
 	}
-	if b.prog, err = buildProgram(solidVS, solidFS); err != nil {
+	stepFS, drawFS, ok := effectShaders(b.effect)
+	if !ok {
+		return fmt.Errorf("gpu: no shader for effect %q", b.effect)
+	}
+	if b.stepProg, err = buildProgram(effectVS, stepFS); err != nil {
 		return err
 	}
-	b.loc = glUniformLocation(b.prog, "uColor")
-	b.aPos = glAttribLocation(b.prog, "aPos")
+	if b.drawProg, err = buildProgram(effectVS, drawFS); err != nil {
+		C.glDeleteProgram(b.stepProg)
+		b.stepProg = 0
+		return err
+	}
+	b.stepU = resolveUniforms(b.stepProg)
+	b.drawU = resolveUniforms(b.drawProg)
 	return b.uploadFullscreenTriangle()
+}
+
+func resolveUniforms(p C.GLuint) shaderUniforms {
+	return shaderUniforms{
+		uPrev:    glUniformLocation(p, "uPrev"),
+		uTime:    glUniformLocation(p, "uTime"),
+		uSeed:    glUniformLocation(p, "uSeed"),
+		uGrid:    glUniformLocation(p, "uGrid"),
+		uPalette: glUniformLocation(p, "uPalette"),
+	}
 }
 
 // uploadFullscreenTriangle feeds one oversized triangle that covers the
@@ -195,8 +237,9 @@ func (b *gpuBackend) uploadFullscreenTriangle() error {
 	C.glBindBuffer(C.GL_ARRAY_BUFFER, b.vbo)
 	C.glBufferData(C.GL_ARRAY_BUFFER,
 		C.GLsizeiptr(len(verts)*4), unsafe.Pointer(&verts[0]), C.GL_STATIC_DRAW)
-	C.glEnableVertexAttribArray(C.GLuint(b.aPos))
-	C.glVertexAttribPointer(C.GLuint(b.aPos), 2, C.GL_FLOAT, C.GL_FALSE, 0, nil)
+	// buildProgram pins aPos to location 0 in every effect program.
+	C.glEnableVertexAttribArray(0)
+	C.glVertexAttribPointer(0, 2, C.GL_FLOAT, C.GL_FALSE, 0, nil)
 	return glErr("uploadFullscreenTriangle")
 }
 
@@ -218,7 +261,11 @@ func (b *gpuBackend) resize(w, h int) error {
 	if b.fbo != 0 {
 		C.glDeleteFramebuffers(1, &b.fbo)
 		C.glDeleteTextures(1, &b.tex)
+		C.glDeleteFramebuffers(2, &b.sfbo[0])
+		C.glDeleteTextures(2, &b.stex[0])
 		b.fbo, b.tex = 0, 0
+		b.sfbo, b.stex = [2]C.GLuint{}, [2]C.GLuint{}
+		b.cur = 0
 	}
 	b.w, b.h = w, h
 
@@ -239,6 +286,31 @@ func (b *gpuBackend) resize(w, h int) error {
 		return fmt.Errorf("gpu: framebuffer incomplete (0x%x)", uint32(st))
 	}
 	C.glBindFramebuffer(C.GL_FRAMEBUFFER, 0)
+
+	// The ping-pong state pair holds effect data, not colour, so it is sampled
+	// with NEAREST. glTexImage2D with nil data leaves contents undefined, hence
+	// the explicit clear of both targets.
+	for i := 0; i < 2; i++ {
+		C.glGenTextures(1, &b.stex[i])
+		C.glBindTexture(C.GL_TEXTURE_2D, b.stex[i])
+		C.glTexImage2D(C.GL_TEXTURE_2D, 0, C.GL_RGBA, C.GLsizei(w), C.GLsizei(h), 0,
+			C.GL_RGBA, C.GL_UNSIGNED_BYTE, nil)
+		C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MIN_FILTER, C.GL_NEAREST)
+		C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_MAG_FILTER, C.GL_NEAREST)
+		C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_WRAP_S, C.GL_CLAMP_TO_EDGE)
+		C.glTexParameteri(C.GL_TEXTURE_2D, C.GL_TEXTURE_WRAP_T, C.GL_CLAMP_TO_EDGE)
+
+		C.glGenFramebuffers(1, &b.sfbo[i])
+		C.glBindFramebuffer(C.GL_FRAMEBUFFER, b.sfbo[i])
+		C.glFramebufferTexture2D(C.GL_FRAMEBUFFER, C.GL_COLOR_ATTACHMENT0,
+			C.GL_TEXTURE_2D, b.stex[i], 0)
+		if st := C.glCheckFramebufferStatus(C.GL_FRAMEBUFFER); st != C.GL_FRAMEBUFFER_COMPLETE {
+			return fmt.Errorf("gpu: state framebuffer %d incomplete (0x%x)", i, uint32(st))
+		}
+		C.glClearColor(0, 0, 0, 0)
+		C.glClear(C.GL_COLOR_BUFFER_BIT)
+	}
+	C.glBindFramebuffer(C.GL_FRAMEBUFFER, 0)
 	return glErr("resize")
 }
 
@@ -249,8 +321,8 @@ func (b *gpuBackend) Step() error {
 	return nil
 }
 
-// Draw paints one frame. Task 4 and 5 render a solid colour: that proves the
-// FBO, the program and the readback line up before any effect shader exists.
+// Draw runs the effect's accumulated steps into the state pair, paints the
+// draw pass into the FBO, and reads it back into the caller's BGRA memory.
 func (b *gpuBackend) Draw(pixels []byte, stride int) error {
 	glMu.Lock()
 	defer glMu.Unlock()
@@ -258,12 +330,36 @@ func (b *gpuBackend) Draw(pixels []byte, stride int) error {
 	if b.ticks == 0 {
 		b.ticks = 1
 	}
-	C.glBindFramebuffer(C.GL_FRAMEBUFFER, b.fbo)
 	C.glViewport(0, 0, C.GLsizei(b.w), C.GLsizei(b.h))
-	C.glClearColor(0, 0, 0, 0)
-	C.glClear(C.GL_COLOR_BUFFER_BIT)
-	C.glUseProgram(b.prog)
-	C.glUniform4f(b.loc, 1, 0, 0, 1)
+	C.glActiveTexture(C.GL_TEXTURE0)
+
+	// Pass A: advance the streak state one tick per step, ping-ponging the
+	// state pair. uTime only moves inside the current 64-tick epoch, so the
+	// hash inputs stay small enough to be exact in any float precision.
+	C.glUseProgram(b.stepProg)
+	C.glUniform1i(b.stepU.uSeed, C.GLint(b.seed))
+	C.glUniform2f(b.stepU.uGrid, C.GLfloat(b.w), C.GLfloat(b.h))
+	for i := 0; i < b.ticks; i++ {
+		b.stepTime++
+		C.glBindFramebuffer(C.GL_FRAMEBUFFER, b.sfbo[b.cur])
+		C.glBindTexture(C.GL_TEXTURE_2D, b.stex[1-b.cur])
+		C.glUniform1i(b.stepU.uPrev, 0)
+		C.glUniform1f(b.stepU.uTime, C.GLfloat(b.stepTime))
+		C.glDrawArrays(C.GL_TRIANGLES, 0, 3)
+		b.cur = 1 - b.cur
+	}
+	b.ticks = 0
+
+	// Pass B: shade the freshest state with the palette into the readback FBO.
+	// The loop left cur pointing at the stale buffer, so read its sibling.
+	C.glBindFramebuffer(C.GL_FRAMEBUFFER, b.fbo)
+	C.glUseProgram(b.drawProg)
+	C.glBindTexture(C.GL_TEXTURE_2D, b.stex[1-b.cur])
+	C.glUniform1i(b.drawU.uPrev, 0)
+	C.glUniform1f(b.drawU.uTime, C.GLfloat(b.stepTime))
+	C.glUniform1i(b.drawU.uSeed, C.GLint(b.seed))
+	C.glUniform2f(b.drawU.uGrid, C.GLfloat(b.w), C.GLfloat(b.h))
+	C.glUniform3fv(b.drawU.uPalette, paletteStopsN, (*C.GLfloat)(unsafe.Pointer(&b.pal[0])))
 	C.glDrawArrays(C.GL_TRIANGLES, 0, 3)
 	C.glFinish()
 	if err := glErr("draw"); err != nil {
@@ -320,6 +416,20 @@ func (b *gpuBackend) glErrors() int {
 	return n
 }
 
+// paintSolid fills the draw FBO with one flat colour and reads it back,
+// exercising the FBO/readback plumbing without any effect shader. It exists
+// only for the round-trip tests, next to glErrors, which they also use.
+func (b *gpuBackend) paintSolid(rgba [4]float32, dst []byte, stride int) error {
+	glMu.Lock()
+	defer glMu.Unlock()
+	C.glBindFramebuffer(C.GL_FRAMEBUFFER, b.fbo)
+	C.glViewport(0, 0, C.GLsizei(b.w), C.GLsizei(b.h))
+	C.glClearColor(C.GLfloat(rgba[0]), C.GLfloat(rgba[1]), C.GLfloat(rgba[2]), C.GLfloat(rgba[3]))
+	C.glClear(C.GL_COLOR_BUFFER_BIT)
+	C.glFinish()
+	return b.readback(dst, stride)
+}
+
 // close assumes glMu is already held, so construction failure paths can reuse it.
 func (b *gpuBackend) close() error {
 	if b.closed {
@@ -334,11 +444,22 @@ func (b *gpuBackend) close() error {
 		if b.tex != 0 {
 			C.glDeleteTextures(1, &b.tex)
 		}
+		for i := 0; i < 2; i++ {
+			if b.sfbo[i] != 0 {
+				C.glDeleteFramebuffers(1, &b.sfbo[i])
+			}
+			if b.stex[i] != 0 {
+				C.glDeleteTextures(1, &b.stex[i])
+			}
+		}
 		if b.vbo != 0 {
 			C.glDeleteBuffers(1, &b.vbo)
 		}
-		if b.prog != 0 {
-			C.glDeleteProgram(b.prog)
+		if b.stepProg != 0 {
+			C.glDeleteProgram(b.stepProg)
+		}
+		if b.drawProg != 0 {
+			C.glDeleteProgram(b.drawProg)
 		}
 		if b.ctx != eglNoContext {
 			C.eglDestroyContext(b.display, b.ctx)
@@ -356,11 +477,6 @@ func (b *gpuBackend) close() error {
 }
 
 // --- EGL setup -----------------------------------------------------------
-
-// eglGetPlatformDisplay is core in EGL 1.5, but libEGL only guarantees the
-// legacy egl* symbols for direct linking (this box exports the core name and not
-// eglGetPlatformDisplayEXT), so it is fetched by name.
-type eglPlatformDisplayFn func(C.EGLenum, unsafe.Pointer, *C.EGLint) C.EGLDisplay
 
 func eglOpenDisplay() (C.EGLDisplay, error) {
 	// Mesa advertises surfaceless rendering as a client-side platform extension,
@@ -467,6 +583,11 @@ func buildProgram(vs, fs string) (C.GLuint, error) {
 		return 0, err
 	}
 	p := C.glCreateProgram()
+	// Pin aPos to location 0 so uploadFullscreenTriangle needs no program
+	// introspection; the attribute state is shared by both passes.
+	cap0 := C.CString("aPos")
+	C.glBindAttribLocation(p, 0, cap0)
+	C.free(unsafe.Pointer(cap0))
 	C.glAttachShader(p, v)
 	C.glAttachShader(p, f)
 	C.glLinkProgram(p)
@@ -527,22 +648,3 @@ func glUniformLocation(p C.GLuint, name string) C.GLint {
 	defer C.free(unsafe.Pointer(c))
 	return C.glGetUniformLocation(p, (*C.GLchar)(unsafe.Pointer(c)))
 }
-
-func glAttribLocation(p C.GLuint, name string) C.GLint {
-	c := C.CString(name)
-	defer C.free(unsafe.Pointer(c))
-	return C.glGetAttribLocation(p, (*C.GLchar)(unsafe.Pointer(c)))
-}
-
-// The solid pair exists only to prove the EGL/FBO/readback plumbing before any
-// effect shader does; Task 6 replaces it with the real programs.
-const solidVS = `
-attribute vec2 aPos;
-void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
-`
-
-const solidFS = `
-precision mediump float;
-uniform vec4 uColor;
-void main() { gl_FragColor = uColor; }
-`

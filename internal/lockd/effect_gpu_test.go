@@ -27,7 +27,7 @@ func newTestGpuBackend(t *testing.T, w, h int) *gpuBackend {
 func TestGpuRedRoundTrip(t *testing.T) {
 	b := newTestGpuBackend(t, 2, 2)
 	dst := make([]byte, 2*2*4)
-	if err := b.Draw(dst, 2*4); err != nil {
+	if err := b.paintSolid([4]float32{1, 0, 0, 1}, dst, 2*4); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < len(dst); i += 4 {
@@ -47,7 +47,7 @@ func TestGpuDrawHonorsStride(t *testing.T) {
 	b := newTestGpuBackend(t, w, h)
 	const sentinel = 0x77
 	dst := bytes.Repeat([]byte{sentinel}, h*stride)
-	if err := b.Draw(dst, stride); err != nil {
+	if err := b.paintSolid([4]float32{1, 0, 0, 1}, dst, stride); err != nil {
 		t.Fatal(err)
 	}
 	want := func(x, y int) byte {
@@ -127,5 +127,68 @@ func TestGpuBackendInit(t *testing.T) {
 	defer b.Close()
 	if err := b.Step(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGpuRainFrame(t *testing.T) {
+	const w, h = 16, 16
+	b := newTestGpuBackend(t, w, h)
+	dst := make([]byte, w*h*4)
+	for i := 0; i < 20; i++ {
+		if err := b.Step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.Draw(dst, w*4); err != nil {
+		t.Fatal(err)
+	}
+	lit := 0
+	for i := 0; i < len(dst); i += 4 {
+		if dst[i+3] != 0xff {
+			t.Fatalf("pixel %d: alpha must be opaque, got 0x%02x", i/4, dst[i+3])
+		}
+		if dst[i]|dst[i+1]|dst[i+2] != 0 {
+			lit++
+		}
+	}
+	if lit == 0 {
+		t.Fatal("20 rain ticks produced an all-black frame")
+	}
+	if n := b.glErrors(); n != 0 {
+		t.Fatalf("%d GL errors after the frame", n)
+	}
+}
+
+// GPU-vs-GPU determinism is the gate the CPU side can never offer: the
+// animations effects draw from the global math/rand, so two renderer
+// instances can't be byte-compared at all. Same seed, same step count, same
+// driver => identical bytes.
+//
+// ponytail: identical only on one driver; cross-vendor float hashing may
+// differ. If a Mesa mediump flake shows up, relax to coverage-only.
+func TestGpuRainDeterministic(t *testing.T) {
+	const w, h = 16, 16
+	frame := func() []byte {
+		// One backend alive at a time: the EGL context is current on the
+		// constructing thread, exactly like the worker, which holds a single
+		// paint backend. Close is idempotent with the registered cleanup.
+		b := newTestGpuBackend(t, w, h)
+		dst := make([]byte, w*h*4)
+		for i := 0; i < 20; i++ {
+			if err := b.Step(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := b.Draw(dst, w*4); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return dst
+	}
+	a, b := frame(), frame()
+	if !bytes.Equal(a, b) {
+		t.Fatal("two fresh rain backends with identical seeds drew different frames")
 	}
 }
