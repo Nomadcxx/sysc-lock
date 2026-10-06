@@ -161,7 +161,18 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			}
 		}
 	}()
-	client.OnEvent = report
+	var amb ambientChild
+	defer amb.stop()
+	ambientStarted := false
+	client.OnEvent = func(s lockd.Snapshot) {
+		if armAmbient(s.Phase, ambientStarted) {
+			ambientStarted = true
+			amb = startAmbient()
+		}
+		if report != nil {
+			report(s)
+		}
+	}
 	client.BeforeUnlock = beforeUnlock
 	defer client.Close()
 	client.OnDeadline = func(now time.Time) time.Time {
@@ -202,8 +213,6 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
 		return lockd.Idle, err
 	}
-	amb := startAmbient()
-	defer amb.stop()
 	stopLogind := make(chan struct{})
 	defer close(stopLogind)
 	go func() {
