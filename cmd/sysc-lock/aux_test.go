@@ -145,6 +145,40 @@ func TestEscapeDuringVerificationKeepsEntry(t *testing.T) {
 	}
 }
 
+func TestCancelThenEnterReleaseDoesNotSubmit(t *testing.T) {
+	menu := power.New(power.DefaultOrder, power.Availability{Reboot: true, Shutdown: true}, "c2")
+	menu.Press(power.Key{F4: true}, time.Now())
+	for menu.Selected() < len(menu.Items())-1 {
+		menu.Press(power.Key{Down: true}, time.Now())
+	}
+	menu.Press(power.Key{Enter: true}, time.Now())
+	if menu.Open() {
+		t.Fatal("Cancel closes the popup")
+	}
+	model := &input.Model{}
+	model.Append("secret")
+	gate := &enterGate{}
+	r := &input.Reveal{}
+	now := time.Unix(100, 0)
+	r.Show(now)
+	submit, err := gate.press(model, r, lockd.Key{Enter: true, Released: true}, now)
+	if submit || err != nil {
+		t.Fatal("the Cancel key-up must not authenticate", submit, err)
+	}
+}
+
+func TestOpenPopupHoldsTheRevealInTheGate(t *testing.T) {
+	model := &input.Model{}
+	var r input.Reveal
+	g := &enterGate{}
+	now := time.Unix(100, 0)
+	r.Show(now)
+	later := now.Add(input.HideAfter + time.Second)
+	if g.visible(model, &r, later, true) != true {
+		t.Fatal("an open popup must keep the field up in the key gate")
+	}
+}
+
 func TestPopupKeysNeverReachThePasswordBuffer(t *testing.T) {
 	m := power.New(power.DefaultOrder, power.Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Press(power.Key{F4: true}, time.Now())
@@ -396,5 +430,26 @@ func TestCtrlCombosNeverType(t *testing.T) {
 	}
 	if m.Password() != "" {
 		t.Fatal("ctrl combo typed into the entry")
+	}
+}
+
+func TestAmbientRowRecutsWhenTheBudgetChanges(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ambient.json")
+	now := time.Unix(900, 0)
+	pct, media := 82, ambient.Playing
+	body, err := json.Marshal(ambient.Snapshot{AsOf: now, BatteryPct: &pct, Media: media, Link: ambient.LinkWifi})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	row := ambientRow{path: path}
+	if got := row.Get(now, 40); got != "82% • Wi-Fi • playing" {
+		t.Fatalf("wide: %q", got)
+	}
+	if got := row.Get(now.Add(10*time.Millisecond), 4); got != "82%" {
+		t.Fatalf("narrow budget must drop from the right in the same second: %q", got)
 	}
 }

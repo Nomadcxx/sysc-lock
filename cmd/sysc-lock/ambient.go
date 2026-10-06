@@ -42,14 +42,15 @@ func loadAmbient(path string, now time.Time, maxRunes int) string {
 // most once a second on its existing repaints — it never polls in a loop of
 // its own.
 type ambientRow struct {
-	path string
-	at   time.Time
-	line string
+	path  string
+	at    time.Time
+	runes int
+	line  string
 }
 
 func (r *ambientRow) Get(now time.Time, maxRunes int) string {
-	if r.at.IsZero() || now.Sub(r.at) >= time.Second {
-		r.at = now
+	if r.at.IsZero() || now.Sub(r.at) >= time.Second || r.runes != maxRunes {
+		r.at, r.runes = now, maxRunes
 		r.line = loadAmbient(r.path, now, maxRunes)
 	}
 	return r.line
