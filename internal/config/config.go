@@ -43,6 +43,10 @@ type Config struct {
 	Blur *bool `json:"blur_backdrop"`
 	// BlurRadius is the box-blur radius in pixels, clamped to [0,64].
 	BlurRadius *int `json:"blur_radius"`
+	// EffectBackend selects the effect engine: auto, cpu or gpu. Nil means auto.
+	EffectBackend *string `json:"effect_backend"`
+	// EffectGpuPowerSave caps the GPU path while on battery. Nil means enabled.
+	EffectGpuPowerSave *bool `json:"effect_gpu_power_save"`
 	// PowerActions is the ordered Power Options menu. An empty list removes
 	// the menu, the F4 hint and the help-line mention.
 	PowerActions []power.Action `json:"power_actions"`
@@ -50,6 +54,22 @@ type Config struct {
 
 // BlurBackdrop reports whether the frozen blurred backdrop is wanted.
 func (c Config) BlurBackdrop() bool { return c.Blur == nil || *c.Blur }
+
+// BackendChoice returns the effect engine: "cpu", "gpu", or "auto" when unset
+// or unrecognized.
+func (c Config) BackendChoice() string {
+	if c.EffectBackend == nil {
+		return "auto"
+	}
+	switch *c.EffectBackend {
+	case "cpu", "gpu":
+		return *c.EffectBackend
+	}
+	return "auto"
+}
+
+// GpuPowerSave reports whether the on-battery GPU cap applies.
+func (c Config) GpuPowerSave() bool { return c.EffectGpuPowerSave == nil || *c.EffectGpuPowerSave }
 
 // BlurRadiusPx returns the configured radius clamped to [0,64].
 func (c Config) BlurRadiusPx() int {
