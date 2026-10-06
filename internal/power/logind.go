@@ -90,6 +90,10 @@ func (e Executor) call(a Action) error {
 			return fmt.Errorf("no session to terminate")
 		}
 		return e.Caller.Method("TerminateSession", e.Session)
+	case Suspend:
+		return e.Caller.Method("Suspend", false)
+	case Hibernate:
+		return e.Caller.Method("Hibernate", false)
 	}
 	return fmt.Errorf("unknown action %q", a)
 }
@@ -98,7 +102,12 @@ func (e Executor) call(a Action) error {
 // plain yes hides the item: challenge would fail against interactive=false,
 // and a query error hides it too. Ending your own session needs no permission.
 func Check(c Caller) Availability {
-	return Availability{Reboot: yes(c, "CanReboot"), Shutdown: yes(c, "CanPowerOff")}
+	return Availability{
+		Reboot:    yes(c, "CanReboot"),
+		Shutdown:  yes(c, "CanPowerOff"),
+		Suspend:   yes(c, "CanSuspend"),
+		Hibernate: yes(c, "CanHibernate"),
+	}
 }
 
 func yes(c Caller, prop string) bool {

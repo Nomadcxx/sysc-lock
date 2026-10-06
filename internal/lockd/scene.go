@@ -120,7 +120,7 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 		s.Help = image.Rect(x, yHelp, x+entryW, yHelp+lineH)
 	}
 	menuW := min(max(px(320), entryW), max(1, width-2*margin))
-	menuH := min(px(180), max(1, height-2*margin))
+	menuH := min(px(260), max(1, height-2*margin))
 	mx := (width - menuW) / 2
 	my := min(s.Entry.Min.Y-(menuH-entryH)/2, height-margin-menuH)
 	s.Menu = image.Rect(mx, max(margin, my), mx+menuW, max(margin, my)+menuH)

@@ -33,10 +33,14 @@ func TestNormalizeDropsUnknownAndDuplicatesKeepingOrder(t *testing.T) {
 	if len(Normalize(nil)) != 0 {
 		t.Fatal("an absent list is empty, not the default")
 	}
+	got = Normalize([]Action{"suspend", "hibernate", "suspend"})
+	if len(got) != 2 || got[0] != Suspend || got[1] != Hibernate {
+		t.Fatalf("suspend/hibernate %v", got)
+	}
 }
 
 func TestNewDropsUnavailableItemsAndAMissingSession(t *testing.T) {
-	all := Availability{true, true}
+	all := Availability{Reboot: true, Shutdown: true}
 	m := New(DefaultOrder, all, "c2")
 	if !equal(labels(m), []string{"Log out", "Reboot", "Shutdown", "Cancel"}) {
 		t.Fatal(labels(m))
@@ -55,10 +59,14 @@ func TestNewDropsUnavailableItemsAndAMissingSession(t *testing.T) {
 	if none.Open() {
 		t.Fatal("an empty menu must not open")
 	}
+	sleep := New([]Action{Suspend, Hibernate}, Availability{Suspend: true}, "c2")
+	if !equal(labels(sleep), []string{"Suspend", "Cancel"}) {
+		t.Fatal("hibernate stayed hidden:", labels(sleep))
+	}
 }
 
 func TestToggleAndSelectionStartsOnTheFirstRow(t *testing.T) {
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Toggle()
 	if !m.Open() || m.Selected() != 0 {
 		t.Fatal("the popup opens on the first row", m.Selected())
@@ -70,7 +78,7 @@ func TestToggleAndSelectionStartsOnTheFirstRow(t *testing.T) {
 }
 
 func TestNavigationClampsAndNeverWraps(t *testing.T) {
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Toggle()
 	at := time.Now()
 	m.Press(Key{Up: true}, at)
@@ -94,7 +102,7 @@ func TestNavigationClampsAndNeverWraps(t *testing.T) {
 }
 
 func TestCancelActsOnOnePress(t *testing.T) {
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Toggle()
 	m.Press(Key{Down: true}, time.Now())
 	m.Press(Key{Down: true}, time.Now())
@@ -108,7 +116,7 @@ func TestCancelActsOnOnePress(t *testing.T) {
 }
 
 func TestEscapeClosesWithoutCommitting(t *testing.T) {
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Toggle()
 	if a := m.Press(Key{Escape: true}, time.Now()); a != "" {
 		t.Fatalf("escape commits nothing, got %q", a)
@@ -119,7 +127,7 @@ func TestEscapeClosesWithoutCommitting(t *testing.T) {
 }
 
 func TestHoldCompletesAtTheThreshold(t *testing.T) {
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Toggle()
 	start := time.Now()
 	if a := m.Press(Key{Enter: true}, start); a != "" {
@@ -146,7 +154,7 @@ func TestHoldCompletesAtTheThreshold(t *testing.T) {
 }
 
 func TestProgressTracksTheHoldAndSaturates(t *testing.T) {
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Toggle()
 	start := time.Now()
 	m.Press(Key{Enter: true}, start)
@@ -163,7 +171,7 @@ func TestReleaseAndKeyboardLeaveResetTheHold(t *testing.T) {
 		"enter release": {Enter: true, Released: true},
 		"leave marker":  {Released: true},
 	} {
-		m := New(DefaultOrder, Availability{true, true}, "c2")
+		m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 		m.Toggle()
 		start := time.Now()
 		m.Press(Key{Enter: true}, start)
@@ -181,7 +189,7 @@ func TestReleaseAndKeyboardLeaveResetTheHold(t *testing.T) {
 
 func TestNavigationAndCloseResetTheHold(t *testing.T) {
 	for name, k := range map[string]Key{"move": {Down: true}, "escape": {Escape: true}} {
-		m := New(DefaultOrder, Availability{true, true}, "c2")
+		m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 		m.Toggle()
 		start := time.Now()
 		m.Press(Key{Enter: true}, start)
@@ -190,7 +198,7 @@ func TestNavigationAndCloseResetTheHold(t *testing.T) {
 			t.Fatalf("%s must reset the hold, got %q", name, a)
 		}
 	}
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Toggle()
 	start := time.Now()
 	m.Press(Key{Enter: true}, start)
@@ -201,7 +209,7 @@ func TestNavigationAndCloseResetTheHold(t *testing.T) {
 }
 
 func TestOneActionInFlightAtATime(t *testing.T) {
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Toggle()
 	start := time.Now()
 	m.Press(Key{Enter: true}, start)
@@ -220,7 +228,7 @@ func TestOneActionInFlightAtATime(t *testing.T) {
 }
 
 func TestKeysBeforeOpenOnlyToggle(t *testing.T) {
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	at := time.Now()
 	if a := m.Press(Key{Enter: true}, at); a != "" || m.Holding() {
 		t.Fatal("a closed menu never starts a hold")
@@ -235,7 +243,7 @@ func TestKeysBeforeOpenOnlyToggle(t *testing.T) {
 }
 
 func TestF4WhileOpenResetsToTheFirstRow(t *testing.T) {
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Press(Key{F4: true}, time.Now())
 	m.Press(Key{Down: true}, time.Now())
 	m.Press(Key{Enter: true}, time.Now())
@@ -248,7 +256,7 @@ func TestF4WhileOpenResetsToTheFirstRow(t *testing.T) {
 }
 
 func TestRecoverClearsBusySoAFailedActionCanBeRetried(t *testing.T) {
-	m := New(DefaultOrder, Availability{true, true}, "c2")
+	m := New(DefaultOrder, Availability{Reboot: true, Shutdown: true}, "c2")
 	m.Toggle()
 	start := time.Now()
 	m.Press(Key{Enter: true}, start)

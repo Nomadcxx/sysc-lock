@@ -72,9 +72,11 @@ func TestRunUsesTheRightMethodAndArguments(t *testing.T) {
 		method string
 		args   []any
 	}{
-		Reboot:   {"Reboot", []any{false}},
-		Shutdown: {"PowerOff", []any{false}},
-		Logout:   {"TerminateSession", []any{"c2"}},
+		Reboot:    {"Reboot", []any{false}},
+		Shutdown:  {"PowerOff", []any{false}},
+		Logout:    {"TerminateSession", []any{"c2"}},
+		Suspend:   {"Suspend", []any{false}},
+		Hibernate: {"Hibernate", []any{false}},
 	} {
 		f := &fakeCaller{}
 		if got := (Executor{Caller: f, Session: "c2"}).Run(a); got != OK {
