@@ -3,7 +3,6 @@ package lockd
 import (
 	"fmt"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
-	"github.com/Nomadcxx/sysc-terminal/renderer"
 	"image"
 	"sync"
 	"time"
@@ -11,7 +10,6 @@ import (
 
 type backgroundFrame struct {
 	pixels        []byte
-	history       *renderer.Frame
 	width, height int
 	err           error
 }
@@ -31,7 +29,7 @@ type backgroundWorker struct {
 	storageBytes  int             // reserved owner pixel accounting, includes one in-flight frame
 }
 
-func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake func()) *backgroundWorker {
+func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake func(), newBackend backendFactory) *backgroundWorker {
 	b := &backgroundWorker{jobs: make(chan backgroundJob, 1), results: make(chan backgroundFrame, 1), stopped: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer func() { close(b.done); wake() }()
@@ -44,7 +42,12 @@ func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake
 				wake()
 			}
 		}()
-		var r *renderer.Renderer
+		var paint EffectBackend
+		defer func() {
+			if paint != nil {
+				paint.Close()
+			}
+		}()
 		for {
 			select {
 			case <-b.stopped:
@@ -62,19 +65,19 @@ func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake
 						fb.Cover(img)
 					}
 				} else {
-					if r == nil {
-						r, err = renderer.New(renderer.Config{Effect: effect, Palette: palette, Width: job.width, Height: job.height, PixelSize: 12})
+					if paint == nil {
+						paint, err = newBackend(effect, palette, job.width, job.height)
 					} else {
-						err = r.Resize(job.width, job.height)
+						err = paint.Resize(job.width, job.height)
 					}
 					if err == nil {
-						err = r.Step()
+						err = paint.Step()
 					}
 					if err == nil {
 						if frame.width != job.width || frame.height != job.height {
 							frame = backgroundFrame{width: job.width, height: job.height, pixels: make([]byte, job.width*job.height*4)}
 						}
-						frame.history, err = r.Draw(frame.pixels, job.width*4, frame.history)
+						err = paint.Draw(frame.pixels, job.width*4)
 					}
 				}
 				frame.err = err
@@ -175,7 +178,7 @@ func (c *Client) scheduleBackground(out *lockOut, now time.Time) {
 		if 2*size > maxPixelBytes-c.pixelBytes() {
 			return
 		} // opaque foreground already exists
-		b = newBackgroundWorker(c.effect, c.palette, c.wallpaper, func() { c.Post(func() { c.collectBackground(out) }) })
+		b = newBackgroundWorker(c.effect, c.palette, c.wallpaper, func() { c.Post(func() { c.collectBackground(out) }) }, newCpuBackend)
 		out.background = b
 	}
 	need := b.jobStorage(out.w, out.h)

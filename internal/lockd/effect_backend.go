@@ -19,6 +19,11 @@ type backendFactory func(effect, palette string, width, height int) (EffectBacke
 type cpuBackend struct {
 	r     *renderer.Renderer
 	frame *renderer.Frame
+	// dest identifies the buffer the renderer last drew into. The renderer
+	// patches only changed cells, so a different destination must force a full
+	// redraw instead of inheriting another buffer's history.
+	dest  *byte
+	wrote bool
 }
 
 func newCpuBackend(effect, palette string, width, height int) (EffectBackend, error) {
@@ -37,6 +42,13 @@ func (b *cpuBackend) Step() error           { return b.r.Step() }
 func (b *cpuBackend) Close() error { return nil }
 
 func (b *cpuBackend) Draw(pixels []byte, stride int) error {
+	if b.wrote && (len(pixels) == 0 || &pixels[0] != b.dest) {
+		b.frame = nil // destination changed: full redraw, never another buffer's history
+	}
+	if len(pixels) > 0 {
+		b.dest = &pixels[0]
+		b.wrote = true
+	}
 	f, err := b.r.Draw(pixels, stride, b.frame)
 	b.frame = f
 	return err
