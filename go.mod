@@ -3,6 +3,7 @@ module github.com/Nomadcxx/sysc-lock
 go 1.26.0
 
 require (
+	github.com/Nomadcxx/sysc-Go v1.0.4-0.20261004042739-c80d48f1f38e
 	github.com/Nomadcxx/sysc-terminal v0.0.0-20261004174459-4e522749ac8b
 	github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1
 	github.com/godbus/dbus/v5 v5.2.2
@@ -13,7 +14,6 @@ require (
 )
 
 require (
-	github.com/Nomadcxx/sysc-Go v1.0.4-0.20261004042739-c80d48f1f38e // indirect
 	github.com/charmbracelet/colorprofile v0.3.2 // indirect
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20250915111650-81d4262876ef // indirect
