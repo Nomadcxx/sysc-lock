@@ -34,14 +34,18 @@ func pickTextMime(formats []string) string {
 	return ""
 }
 
-// sanitizePaste keeps only printable runes. Newlines (which would otherwise
-// smuggle an Enter into PAM), tabs and control characters are dropped.
+// sanitizePaste keeps printable runes and maps non-ASCII spaces (NBSP and
+// friends) to a normal space instead of silently shifting characters.
+// Newlines, tabs and control characters are dropped.
 func sanitizePaste(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
-		if unicode.IsPrint(r) {
+		switch {
+		case unicode.IsPrint(r):
 			b.WriteRune(r)
+		case unicode.Is(unicode.Zs, r):
+			b.WriteRune(' ')
 		}
 	}
 	return b.String()
@@ -58,10 +62,13 @@ func (c *Client) setupDataDevice() {
 		return
 	}
 	c.dataDevice = dd
+	// The offer named by a data_offer is only promoted to the clipboard when
+	// the following selection event names it; drag-and-drop offers never are.
+	var pending []string
 	dd.SetDataOfferHandler(func(ev client.DataDeviceDataOfferEvent) {
-		c.clipFormats = nil
+		pending = nil
 		ev.Id.SetOfferHandler(func(e client.DataOfferOfferEvent) {
-			c.clipFormats = append(c.clipFormats, e.MimeType)
+			pending = append(pending, e.MimeType)
 		})
 	})
 	dd.SetSelectionHandler(func(ev client.DataDeviceSelectionEvent) {
@@ -71,6 +78,8 @@ func (c *Client) setupDataDevice() {
 		c.clipOffer = ev.Id
 		if ev.Id == nil {
 			c.clipFormats = nil
+		} else {
+			c.clipFormats = pending
 		}
 	})
 }

@@ -255,7 +255,9 @@ func (c *Client) global(g client.RegistryGlobalEvent) {
 	case "wl_data_device_manager":
 		if c.dataMgr == nil {
 			o := client.NewDataDeviceManager(ctx)
-			if bind(o, 1) == nil {
+			// v3: wl_data_offer.destroy only exists from version 3, and we
+			// destroy superseded offers. All wlroots compositors have v3.
+			if bind(o, 3) == nil {
 				c.dataMgr = o
 			}
 		}

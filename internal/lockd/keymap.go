@@ -215,8 +215,11 @@ func (c *Client) setupKeyboard() {
 	})
 	kbd.SetLeaveHandler(func(client.KeyboardLeaveEvent) {
 		c.repeat.next = time.Time{}
-		// The clipboard offer is invalid once we lose the keyboard; drop it
-		// (the proxy itself is reclaimed when the connection closes).
+		// The clipboard offer is invalid once we lose the keyboard; drop and
+		// destroy it (the bound manager is v3, so destroy is legal).
+		if c.clipOffer != nil {
+			_ = c.clipOffer.Destroy()
+		}
 		c.clipOffer, c.clipFormats = nil, nil
 		if c.keymap != nil && c.keymap.compose != nil {
 			c.keymap.compose.Reset()
@@ -282,6 +285,11 @@ func specials(sym uint32) (enter, up, down, f4 bool) {
 
 func (c *Client) repeatKey() Key {
 	k := c.keymap.indicators()
+	if k.Ctrl {
+		// Ctrl was added after the repeat armed; a repeating Ctrl+V would
+		// paste the clipboard on every tick. Ctrl combos never repeat.
+		return Key{Ctrl: true, CapsLock: k.CapsLock, NumLock: k.NumLock, Layout: k.Layout}
+	}
 	k.Backspace = c.repeat.key.Backspace
 	if c.repeat.key.composed {
 		k.Text = c.repeat.key.Text

@@ -22,6 +22,10 @@ func TestSanitizePasteDropsNewlines(t *testing.T) {
 	if got := sanitizePaste("ünïcødé ✓"); got != "ünïcødé ✓" {
 		t.Fatalf("got %q", got)
 	}
+	// NBSP must not silently shift characters.
+	if got := sanitizePaste("a\u00a0 b"); got != "a  b" {
+		t.Fatalf("got %q", got)
+	}
 }
 
 func TestPasteWithoutClipboardIsNoop(t *testing.T) {
