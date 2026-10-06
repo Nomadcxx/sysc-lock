@@ -22,8 +22,25 @@ type Result struct {
 	Terminal bool // further attempts are futile (perm denied, expired, maxtries)
 }
 
-// PromptFunc receives PAM conversation prompts. echo=false means secret.
-type PromptFunc func(prompt string, echo bool) (string, error)
+// PromptKind tells the UI how to treat one PAM conversation message.
+type PromptKind int
+
+const (
+	Secret  PromptKind = iota // hidden answer, required
+	Visible                   // echoed answer, required
+	Info                      // display only, never blocks
+	Problem                   // display-only module error
+)
+
+// Prompt is one PAM conversation message. Message text comes from modules
+// and may be sensitive; display it, never log it.
+type Prompt struct {
+	Kind    PromptKind
+	Message string
+}
+
+// PromptFunc receives PAM conversation prompts in sequence.
+type PromptFunc func(Prompt) (string, error)
 
 // Authenticator verifies a user. Implementations are safe to call only
 // sequentially (one conversation at a time).
@@ -74,7 +91,7 @@ func verifyTransaction(authenticate, acctMgmt func(pam.Flags) error, conversatio
 		err := check(0)
 		// PAM modules can ignore callback failures; they never authorize unlock.
 		if *conversationErr != nil {
-			return Result{Message: "Additional prompt unsupported"}
+			return Result{Message: "Authentication failed"}
 		}
 		if err != nil {
 			return mapPamError(err)
@@ -84,28 +101,40 @@ func verifyTransaction(authenticate, acctMgmt func(pam.Flags) error, conversatio
 }
 
 func pamConversation(response PromptFunc, failure *error) pam.ConversationFunc {
-	prompted := false
 	return func(style pam.Style, msg string) (string, error) {
 		if *failure != nil {
 			return "", *failure
 		}
+		var kind PromptKind
 		switch style {
 		case pam.PromptEchoOff:
-			if !prompted && response != nil {
-				prompted = true
-				answer, err := response(msg, false)
-				if err != nil {
-					*failure = err
-					return "", err
-				}
-				return answer, nil
+			kind = Secret
+		case pam.PromptEchoOn:
+			kind = Visible
+		case pam.TextInfo:
+			kind = Info
+		case pam.ErrorMsg:
+			kind = Problem
+		default:
+			*failure = errors.New("unsupported authentication prompt")
+			return "", *failure
+		}
+		if response == nil {
+			if kind == Info || kind == Problem {
+				return "", nil
 			}
-		case pam.ErrorMsg, pam.TextInfo:
-			// Raw module text can contain sensitive details; stage outcomes are sanitized.
+			*failure = errors.New("no prompt responder")
+			return "", *failure
+		}
+		answer, err := response(Prompt{Kind: kind, Message: msg})
+		if err != nil {
+			*failure = err
+			return "", err
+		}
+		if kind == Info || kind == Problem {
 			return "", nil
 		}
-		*failure = errors.New("additional or unsupported authentication prompt")
-		return "", *failure
+		return answer, nil
 	}
 }
 
@@ -124,16 +153,4 @@ func mapPamError(err error) Result {
 		}
 	}
 	return Result{OK: false, Message: "Authentication unavailable"}
-}
-
-// PasswordPrompt supports one hidden prompt; a second could be an OTP.
-func PasswordPrompt(password string) PromptFunc {
-	used := false
-	return func(_ string, echo bool) (string, error) {
-		if used || echo {
-			return "", errors.New("Additional authentication prompt unsupported")
-		}
-		used = true
-		return password, nil
-	}
 }
