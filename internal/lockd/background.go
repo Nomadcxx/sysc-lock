@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"image"
+	"os"
 	"sync"
 	"time"
 )
@@ -27,9 +28,10 @@ type backgroundWorker struct {
 	cached, spare backgroundFrame // owner-only
 	jobDeadline   time.Time       // owner-only
 	storageBytes  int             // reserved owner pixel accounting, includes one in-flight frame
+	demoted       bool            // set by the worker on GPU->CPU drop; readers sync via results
 }
 
-func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake func(), newBackend backendFactory) *backgroundWorker {
+func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake func(), policy effectPolicy, newBackend backendFactory) *backgroundWorker {
 	b := &backgroundWorker{jobs: make(chan backgroundJob, 1), results: make(chan backgroundFrame, 1), stopped: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer func() { close(b.done); wake() }()
@@ -43,21 +45,55 @@ func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake
 			}
 		}()
 		var paint EffectBackend
+		factory, gpu, slow := newBackend, policy.GPU, 0
 		defer func() {
 			if paint != nil {
 				paint.Close()
 			}
 		}()
+		// demote drops the GPU backend for good and retries on CPU. It can
+		// only run while gpu is set and clears it, so the log line is once
+		// per lock.
+		demote := func() {
+			fmt.Fprintf(os.Stderr, "sysc-lock: gpu effect %q dropped to cpu\n", effect)
+			if paint != nil {
+				paint.Close()
+				paint = nil
+			}
+			factory, gpu, slow = newCpuBackend, false, 0
+			b.demoted = true
+		}
+		// draw runs one effect frame against the current backend.
+		draw := func(job backgroundJob) (backgroundFrame, error) {
+			frame := job.previous
+			var err error
+			if paint == nil {
+				paint, err = factory(effect, palette, job.width, job.height)
+			} else {
+				err = paint.Resize(job.width, job.height)
+			}
+			if err == nil {
+				err = paint.Step()
+			}
+			if err == nil {
+				if frame.width != job.width || frame.height != job.height {
+					frame = backgroundFrame{width: job.width, height: job.height, pixels: make([]byte, job.width*job.height*4)}
+				}
+				err = paint.Draw(frame.pixels, job.width*4)
+			}
+			return frame, err
+		}
 		for {
 			select {
 			case <-b.stopped:
 				return
 			case job := <-b.jobs:
-				frame := job.previous
+				var frame backgroundFrame
 				var err error
 
 				if wallpaper != nil {
 					var img image.Image
+					frame = job.previous
 					img, err = wallpaper.load()
 					if err == nil && (frame.width != job.width || frame.height != job.height || len(frame.pixels) != job.width*job.height*4) {
 						frame = backgroundFrame{width: job.width, height: job.height, pixels: make([]byte, job.width*job.height*4)}
@@ -65,19 +101,21 @@ func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake
 						fb.Cover(img)
 					}
 				} else {
-					if paint == nil {
-						paint, err = newBackend(effect, palette, job.width, job.height)
-					} else {
-						err = paint.Resize(job.width, job.height)
-					}
-					if err == nil {
-						err = paint.Step()
-					}
-					if err == nil {
-						if frame.width != job.width || frame.height != job.height {
-							frame = backgroundFrame{width: job.width, height: job.height, pixels: make([]byte, job.width*job.height*4)}
+					start := time.Now()
+					frame, err = draw(job)
+					if err == nil && gpu && policy.Interval > 0 && policy.MaxSlow > 0 {
+						if time.Since(start) > 2*policy.Interval {
+							slow++
+						} else {
+							slow = 0
 						}
-						err = paint.Draw(frame.pixels, job.width*4)
+						if slow >= policy.MaxSlow {
+							demote()
+						}
+					}
+					if err != nil && gpu {
+						demote()
+						frame, err = draw(job)
 					}
 				}
 				frame.err = err
@@ -135,8 +173,9 @@ func (c *Client) effectInterval() time.Duration {
 	}
 	return defaultEffectEvery
 }
-func (c *Client) EnableBackground(effect, palette string, reduced bool) {
+func (c *Client) EnableBackground(effect, palette string, reduced bool, backend string, powerSave bool) {
 	c.effect, c.palette, c.reduced = effect, palette, reduced
+	c.effectBackend, c.effectPowerSave = backend, powerSave
 }
 func (c *Client) motionAllowed(now time.Time) bool {
 	return !c.frozen && (c.resumeAt.IsZero() || !now.Before(c.resumeAt))
@@ -178,7 +217,8 @@ func (c *Client) scheduleBackground(out *lockOut, now time.Time) {
 		if 2*size > maxPixelBytes-c.pixelBytes() {
 			return
 		} // opaque foreground already exists
-		b = newBackgroundWorker(c.effect, c.palette, c.wallpaper, func() { c.Post(func() { c.collectBackground(out) }) }, newCpuBackend)
+		policy := resolveEffectPolicy(c.effectBackend, c.effectPowerSave, c.effectInterval(), systemBattery)
+		b = newBackgroundWorker(c.effect, c.palette, c.wallpaper, func() { c.Post(func() { c.collectBackground(out) }) }, policy, policy.factory())
 		out.background = b
 	}
 	need := b.jobStorage(out.w, out.h)

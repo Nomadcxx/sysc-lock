@@ -93,6 +93,8 @@ type Client struct {
 	viewporter         *viewporter.WpViewporter
 	scaleManager       *fractionalscale.WpFractionalScaleManagerV1
 	effect, palette    string
+	effectBackend      string // "auto" | "cpu" | "gpu"
+	effectPowerSave    bool
 	wallpaper          *wallpaperAsset
 	reduced, frozen    bool
 	effectEvery        time.Duration
