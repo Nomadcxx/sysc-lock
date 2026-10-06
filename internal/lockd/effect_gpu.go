@@ -309,6 +309,17 @@ func (b *gpuBackend) Close() error {
 	return b.close()
 }
 
+// glErrors drains the GL error queue under the context lock.
+func (b *gpuBackend) glErrors() int {
+	glMu.Lock()
+	defer glMu.Unlock()
+	n := 0
+	for C.glGetError() != C.GL_NO_ERROR {
+		n++
+	}
+	return n
+}
+
 // close assumes glMu is already held, so construction failure paths can reuse it.
 func (b *gpuBackend) close() error {
 	if b.closed {

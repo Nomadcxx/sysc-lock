@@ -1,10 +1,69 @@
 package lockd
 
 import (
+	"bytes"
 	"math"
 	"os"
 	"testing"
 )
+
+func newTestGpuBackend(t *testing.T, w, h int) *gpuBackend {
+	t.Helper()
+	if _, err := os.Stat("/dev/dri"); err != nil {
+		t.Skip("no render node")
+	}
+	b, err := newGpuBackend("rain", "nord", w, h)
+	if err != nil {
+		t.Skip("no usable EGL device:", err)
+	}
+	t.Cleanup(func() { b.Close() })
+	gb, ok := b.(*gpuBackend)
+	if !ok {
+		t.Fatalf("factory returned %T", b)
+	}
+	return gb
+}
+
+func TestGpuRedRoundTrip(t *testing.T) {
+	b := newTestGpuBackend(t, 2, 2)
+	dst := make([]byte, 2*2*4)
+	if err := b.Draw(dst, 2*4); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < len(dst); i += 4 {
+		if got := dst[i : i+4]; !bytes.Equal(got, []byte{0, 0, 255, 255}) {
+			t.Fatalf("pixel %d: want {0,0,255,255} BGRA, got %v", i/4, got)
+		}
+	}
+	if n := b.glErrors(); n != 0 {
+		t.Fatalf("%d GL errors after the frame", n)
+	}
+}
+
+// The worker hands rows wider than the image; only the first w pixels of each
+// row may be touched, and padding must keep whatever the caller left there.
+func TestGpuDrawHonorsStride(t *testing.T) {
+	const w, h, stride = 2, 3, 16
+	b := newTestGpuBackend(t, w, h)
+	const sentinel = 0x77
+	dst := bytes.Repeat([]byte{sentinel}, h*stride)
+	if err := b.Draw(dst, stride); err != nil {
+		t.Fatal(err)
+	}
+	want := func(x, y int) byte {
+		if x < w*4 {
+			return []byte{0, 0, 255, 255}[x%4]
+		}
+		return sentinel
+	}
+	for y := 0; y < h; y++ {
+		for x := 0; x < stride; x++ {
+			if dst[y*stride+x] != want(x, y) {
+				t.Fatalf("byte (%d,%d) = 0x%02x, want 0x%02x", x, y, dst[y*stride+x], want(x, y))
+			}
+		}
+	}
+}
 
 // The plan's step-1 sketch says "len(got) == 6" but then states the real rule:
 // always exactly 8 vec3 stops, fewer inputs repeat the last, more truncate to 8.
