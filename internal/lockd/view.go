@@ -36,9 +36,11 @@ type View struct {
 	// handed in by the owner so this package does not import power. Ambient
 	// is the one-line status text the owner reads from the collector's
 	// snapshot file; it draws only while the entry is visible.
-	Power   *PowerView
-	Hint    string
-	Ambient string
+	Power      *PowerView
+	Hint       string
+	Prompt     string // sanitized PAM prompt text, replaces the hint while set
+	PromptEcho bool
+	Ambient    string
 	// Powering is the status shown once an action is under way. While it is
 	// set, keys are ignored.
 	Powering string
@@ -238,6 +240,8 @@ func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectang
 	inner := entry.Inset(max(2, int(8*scale)))
 	if v.Entry == nil || len(v.Entry.Pass) == 0 {
 		drawTextBox(fb, inner, entry.Min.Y+entry.Dy()*2/3, "PASSWORD", v.textPx(entry.Dy()/2, inner), panelInk)
+	} else if v.PromptEcho {
+		drawTextBox(fb, inner, entry.Min.Y+entry.Dy()*2/3, string(v.Entry.Pass), v.textPx(entry.Dy()/2, inner), panelInk)
 	} else {
 		sq := max(2, entry.Dy()/4)
 		step := sq * 3 / 2

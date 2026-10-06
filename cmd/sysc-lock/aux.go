@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"io"
@@ -8,7 +9,10 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
@@ -46,15 +50,39 @@ func emitLockedHandshake(w io.Writer) {
 	fmt.Fprintln(w, lockedHandshakeLine)
 }
 
+// promptAnswer is one reply to a PAM prompt; the once guard makes the first
+// responder win (Enter, Escape, timeout or stale generation) and the rest no-ops.
+type promptAnswer struct {
+	text string
+	err  error
+}
+
+type promptWait struct {
+	reply chan promptAnswer
+	done  sync.Once
+}
+
+func (w *promptWait) send(ans promptAnswer) { w.done.Do(func() { w.reply <- ans }) }
+
+var (
+	errPromptCancelled = errors.New("prompt cancelled")
+	errPromptTimeout   = errors.New("prompt timed out")
+)
+
+// promptDeadline caps how long one secret prompt may wait. ponytail: one
+// knob; fprintd self-times the finger wait inside the PAM stack.
+var promptDeadline = 60 * time.Second
+
 // enterGate serializes PAM: the pump goroutine is the only mutator.
 type enterGate struct {
 	busy       bool
 	generation uint64
 	paste      func() string // clipboard text, set to lockd.Client.Paste
+	prompt     *promptWait   // non-nil while Verify awaits an answer
 }
 
-func (g *enterGate) try(hasEntry bool) bool {
-	if g.busy || !hasEntry {
+func (g *enterGate) try() bool {
+	if g.busy {
 		return false
 	}
 	g.busy = true
@@ -72,32 +100,94 @@ func (g *enterGate) handle(m *input.Model, k lockd.Key) (bool, error) {
 		return false, nil
 	}
 	switch {
-	// Ctrl combos never type; only Ctrl+V pastes the clipboard.
+	case k.Ctrl, k.Insert, k.Backspace, k.Text != "":
+		return false, g.edit(m, k)
+	case k.Enter:
+		// An empty Enter still starts the transaction: a fingerprint-only PAM
+		// stack may answer it without ever asking for a secret.
+		return g.try(), nil
+	case k.Escape:
+		m.Clear()
+	}
+	return false, nil
+}
+
+// edit applies typing and paste keys, shared by the password entry and the
+// prompt entry paths. Ctrl and Shift+Insert paste; Ctrl combos never type.
+func (g *enterGate) edit(m *input.Model, k lockd.Key) error {
+	switch {
 	case k.Ctrl:
 		if (k.Text == "v" || k.Text == "V") && g.paste != nil {
 			if text := g.paste(); text != "" {
-				return false, m.Append(text)
+				return m.Append(text)
 			}
 		}
-		return false, nil
-	// Shift+Insert pastes too, the way the greet entry does.
 	case k.Insert:
 		if k.Shift && g.paste != nil {
 			if text := g.paste(); text != "" {
-				return false, m.Append(text)
+				return m.Append(text)
 			}
 		}
-		return false, nil
-	case k.Enter:
-		return g.try(len(m.Pass) > 0), nil
 	case k.Backspace:
 		m.Backspace()
-	case k.Escape:
-		m.Clear()
 	case k.Text != "":
-		return false, m.Append(k.Text)
+		return m.Append(k.Text)
 	}
-	return false, nil
+	return nil
+}
+
+// promptKey routes one key while a PAM prompt waits for an answer. Enter
+// answers, Escape aborts the conversation; everything else edits the field.
+func (g *enterGate) promptKey(m *input.Model, k lockd.Key) error {
+	w := g.prompt
+	if w == nil || k.Released {
+		return nil
+	}
+	switch {
+	case k.Enter:
+		g.prompt = nil
+		w.send(promptAnswer{text: m.Password()})
+		m.Clear()
+	case k.Escape:
+		g.prompt = nil
+		w.send(promptAnswer{err: errPromptCancelled})
+		m.Clear()
+	default:
+		return g.edit(m, k)
+	}
+	return nil
+}
+
+// displayPrompt makes PAM text safe for the hint strip: printable only,
+// collapsed, capped. The raw message never reaches logs.
+func displayPrompt(msg, def string) string {
+	var b strings.Builder
+	space := false
+	for _, r := range msg {
+		if unicode.Is(unicode.Zs, r) {
+			r = ' '
+		}
+		if !unicode.IsPrint(r) {
+			continue
+		}
+		if r == ' ' {
+			space = b.Len() > 0 && !space
+			continue
+		}
+		if space {
+			b.WriteByte(' ')
+			space = false
+		}
+		b.WriteRune(r)
+	}
+	out := []rune(strings.TrimRight(b.String(), " "))
+	if len(out) == 0 {
+		return def
+	}
+	if len(out) > 60 {
+		return string(out[:59]) + "…"
+	}
+	return string(out)
 }
 
 // press applies one key to the entry. A key on a hidden entry only reveals it

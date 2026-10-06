@@ -12,6 +12,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -56,10 +57,10 @@ func TestBusyEntryCannotChange(t *testing.T) {
 
 func TestLateAuthResultIgnored(t *testing.T) {
 	g := &enterGate{}
-	g.try(true)
+	g.try()
 	old := g.generation
 	g.release()
-	g.try(true)
+	g.try()
 	if g.accept(old, lockd.Locked) {
 		t.Fatal("accepted stale generation")
 	}
@@ -71,20 +72,20 @@ func TestLateAuthResultIgnored(t *testing.T) {
 	}
 }
 
-func TestEnterGateRejectsEmptyAndOverlap(t *testing.T) {
+func TestEnterGateArmsOnce(t *testing.T) {
 	var g enterGate
-	if g.try(false) {
-		t.Fatal("empty password must not start auth")
-	}
-	if !g.try(true) {
+	if !g.try() {
 		t.Fatal("first Enter must start auth")
 	}
-	if g.try(true) {
+	if g.try() {
 		t.Fatal("overlapping Enter must be ignored")
 	}
 	g.release()
-	if !g.try(true) {
+	if !g.try() {
 		t.Fatal("after release, Enter must start auth again")
+	}
+	if g.generation != 2 {
+		t.Fatalf("generation %d", g.generation)
 	}
 }
 
@@ -468,5 +469,20 @@ func TestAmbientRowRecutsWhenTheBudgetChanges(t *testing.T) {
 	}
 	if got := row.Get(now.Add(10*time.Millisecond), 4); got != "82%" {
 		t.Fatalf("narrow budget must drop from the right in the same second: %q", got)
+	}
+}
+func TestDisplayPromptSanitizes(t *testing.T) {
+	if got := displayPrompt("  Pass word:\t ", "x"); got != "Pass word:" {
+		t.Fatalf("spacing %q", got)
+	}
+	long := displayPrompt(strings.Repeat("x", 80), "x")
+	if len([]rune(long)) != 60 || !strings.HasSuffix(long, "…") {
+		t.Fatalf("cap %d", len([]rune(long)))
+	}
+	if got := displayPrompt("Control\x07chars\n", "x"); got != "Controlchars" {
+		t.Fatalf("controls %q", got)
+	}
+	if got := displayPrompt("   ", "Enter code"); got != "Enter code" {
+		t.Fatalf("fallback %q", got)
 	}
 }

@@ -17,8 +17,13 @@ PAM authentication. It supports Niri and sysc-shell.
   no test-mode env var, and no IPC unlock path. Test fakes live only in `_test.go`.
 - The entry is bounded to 4096 UTF-8 bytes. Mutable storage is wiped on deletion,
   clear and completion. Go strings and PAM/runtime copies cannot be reliably
-  erased. Passwords do not enter logs or IPC. One hidden PAM prompt is supported;
-  additional prompts fail without reusing the password.
+  erased. Passwords do not enter logs or IPC. PAM conversations are answered
+  one prompt at a time: hidden and visible prompts take their own fresh answer
+  (never reused), TextInfo lines show sanitized in the hint strip, and error
+  messages appear as status. Escape cancels the conversation and every answer
+  has a 60s deadline; either leaves the session locked. Fingerprint unlocks
+  work through the PAM stack (e.g. `auth sufficient pam_fprintd.so` above
+  `unix_auth`) - sysc-lock never talks to fprintd directly.
 - A persistent session owner holds a logind sleep delay before reporting readiness.
   It releases that descriptor on compositor confirmation for a sleep request,
   then re-arms on resume/unlock. logind's finite delay limit still applies.

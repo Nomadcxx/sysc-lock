@@ -100,6 +100,13 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			client.Repaint()
 			return
 		}
+		if gate.prompt != nil {
+			if err := gate.promptKey(model, k); err != nil {
+				view.SetError(err.Error(), time.Now())
+			}
+			client.Repaint()
+			return
+		}
 		if gate.busy {
 			client.Repaint()
 			return
@@ -133,6 +140,9 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			view.Hint = power.ScreenHelp
 		} else {
 			view.Hint = power.ScreenHelpPlain
+		}
+		if view.Prompt != "" {
+			view.Hint = view.Prompt
 		}
 		cell := max(8, int(8*view.TextScale))
 		view.Ambient = row.Get(now, max(8, lockd.Layout(fb.Width, fb.Height, scale, view.StyleName, "12:59:59 PM").Entry.Dx()/cell))
@@ -242,16 +252,78 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 }
 
 func authenticate(a authenticator, pass string, client *lockd.Client, view *lockd.View, model *input.Model, gate *enterGate, generation uint64) {
-	res, err := a.Verify(a.User(), auth.PasswordPrompt(pass))
+	var abortErr error
+	ask := func(p auth.Prompt) (string, error) {
+		w := &promptWait{reply: make(chan promptAnswer, 1)}
+		timer := time.AfterFunc(promptDeadline, func() {
+			w.send(promptAnswer{err: errPromptTimeout})
+		})
+		client.Post(func() {
+			if !gate.accept(generation, client.State().Phase()) {
+				w.send(promptAnswer{err: errPromptCancelled})
+				return
+			}
+			gate.prompt = w
+			view.Prompt = displayPrompt(p.Message, "Enter code")
+			view.PromptEcho = p.Kind == auth.Visible
+			client.Repaint()
+		})
+		ans := <-w.reply
+		timer.Stop()
+		if ans.err != nil {
+			return "", ans.err
+		}
+		return ans.text, nil
+	}
+	first := pass
 	pass = "" // immutable runtime/PAM copies cannot be reliably erased
+	response := func(p auth.Prompt) (string, error) {
+		switch p.Kind {
+		case auth.Info, auth.Problem:
+			client.Post(func() {
+				if p.Kind == auth.Info {
+					view.Prompt = displayPrompt(p.Message, "Waiting for device")
+				} else {
+					view.SetError(displayPrompt(p.Message, "Authentication error"), time.Now())
+				}
+				client.Repaint()
+			})
+			return "", nil
+		case auth.Visible:
+			text, err := ask(p)
+			if err != nil {
+				abortErr = err
+				return "", err
+			}
+			return text, nil
+		default:
+			if first != "" {
+				text := first
+				first = ""
+				return text, nil
+			}
+			text, err := ask(p)
+			if err != nil {
+				abortErr = err
+				return "", err
+			}
+			return text, nil
+		}
+	}
+	res, err := a.Verify(a.User(), response)
 	client.Post(func() {
 		if !gate.accept(generation, client.State().Phase()) {
 			return
 		}
 		gate.release()
+		gate.prompt = nil
 		view.Busy = false
+		view.Prompt = ""
+		view.PromptEcho = false
 		model.Clear()
 		switch {
+		case abortErr != nil:
+			view.Reject(abortErr.Error(), time.Now())
 		case err != nil:
 			view.SetError("Authentication unavailable", time.Now())
 		case res.OK:
