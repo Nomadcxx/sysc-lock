@@ -7,6 +7,27 @@ import (
 	"time"
 )
 
+func TestCtrlStopsRepeatingPaste(t *testing.T) {
+	// Hold "v" until repeat arms, *then* press Ctrl: the repeating event
+	// must not stay Ctrl+V or it would paste the clipboard on every tick.
+	ctx := xkb.NewContext(context.Background(), xkb.ContextNoFlags)
+	km, err := ctx.NewKeymapFromNames(&xkb.RuleNames{Layout: "us"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := &keymap{state: km.NewState(), mapData: km}
+	c := &Client{keymap: k}
+	c.onKey = func(Key) {}
+	c.repeat = keyRepeat{rate: 25, delay: time.Second, code: 55, key: Key{Text: "v"}}
+	if got := c.repeatKey(); got.Text == "" {
+		t.Fatal("plain repeat lost its text", got)
+	}
+	c.updateModifiers(1<<modIndexCtrl, 0, 0, 0)
+	if got := c.repeatKey(); got.Text != "" || !got.Ctrl {
+		t.Fatal("Ctrl+V repeat would spam paste", got)
+	}
+}
+
 func TestEnterDoesNotRepeat(t *testing.T) {
 	now := time.Now()
 	r := keyRepeat{rate: 25, delay: 300 * time.Millisecond}
@@ -117,5 +138,25 @@ func TestSpecialsMapsEveryKeyTheMenuNeeds(t *testing.T) {
 		if enter != tc.enter || up != tc.up || down != tc.down || f4 != tc.f4 {
 			t.Fatalf("%#x -> %v %v %v %v", tc.sym, enter, up, down, f4)
 		}
+	}
+}
+
+func TestCtrlUpdatesIndicators(t *testing.T) {
+	ctx := xkb.NewContext(context.Background(), xkb.ContextNoFlags)
+	km, err := ctx.NewKeymapFromNames(&xkb.RuleNames{Layout: "us"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := &keymap{state: km.NewState(), mapData: km}
+	c := &Client{keymap: k}
+	var got Key
+	c.onKey = func(key Key) { got = key }
+	c.updateModifiers(1<<modIndexCtrl, 0, 0, 0)
+	if !got.Ctrl {
+		t.Fatal("ctrl depressed not reported", got)
+	}
+	c.updateModifiers(0, 0, 0, 0)
+	if got.Ctrl {
+		t.Fatal("ctrl release not reported", got)
 	}
 }

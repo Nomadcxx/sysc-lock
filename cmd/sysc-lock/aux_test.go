@@ -358,3 +358,34 @@ func TestEnterReleaseNeverSubmits(t *testing.T) {
 		t.Fatal("Enter key-up changed the entry")
 	}
 }
+
+func TestCtrlVAppendsClipboard(t *testing.T) {
+	m := &input.Model{}
+	g := &enterGate{paste: func() string { return "s3cr3t" }}
+	if submit, err := g.handle(m, lockd.Key{Ctrl: true, Text: "v"}); submit || err != nil {
+		t.Fatal("Ctrl+V submitted auth")
+	}
+	if got := m.Password(); got != "s3cr3t" {
+		t.Fatalf("got: %q", got)
+	}
+	if g.busy {
+		t.Fatal("Ctrl+V armed the gate")
+	}
+}
+
+func TestCtrlCombosNeverType(t *testing.T) {
+	m := &input.Model{}
+	g := &enterGate{paste: func() string { return "x" }}
+	for _, k := range []lockd.Key{
+		{Ctrl: true, Text: "x"},
+		{Ctrl: true},
+		{Ctrl: true, Enter: true},
+	} {
+		if submit, err := g.handle(m, k); submit || err != nil {
+			t.Fatalf("ctrl combo %v touched auth", k)
+		}
+	}
+	if m.Password() != "" {
+		t.Fatal("ctrl combo typed into the entry")
+	}
+}

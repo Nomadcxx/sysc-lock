@@ -50,6 +50,7 @@ func emitLockedHandshake(w io.Writer) {
 type enterGate struct {
 	busy       bool
 	generation uint64
+	paste      func() string // clipboard text, set to lockd.Client.Paste
 }
 
 func (g *enterGate) try(hasEntry bool) bool {
@@ -74,6 +75,14 @@ func (g *enterGate) handle(m *input.Model, k lockd.Key) (bool, error) {
 		return false, nil
 	}
 	switch {
+	// Ctrl combos never type; only Ctrl+V pastes the clipboard.
+	case k.Ctrl:
+		if (k.Text == "v" || k.Text == "V") && g.paste != nil {
+			if text := g.paste(); text != "" {
+				return false, m.Append(text)
+			}
+		}
+		return false, nil
 	case k.Enter:
 		return g.try(len(m.Pass) > 0), nil
 	case k.Backspace:

@@ -24,6 +24,7 @@ type Key struct {
 	Backspace bool
 	Escape    bool
 	Shift     bool
+	Ctrl      bool
 	CapsLock  bool
 	NumLock   bool
 	Layout    string
@@ -63,8 +64,14 @@ type Client struct {
 	shmFmt     uint32
 	haveFmt    bool
 	seat       *client.Seat
-	keymap     *keymap
-	keyboard   *client.Keyboard
+	dataMgr    *client.DataDeviceManager
+	dataDevice *client.DataDevice
+	clipOffer  *client.DataOffer
+	// clipFormats is the mime list of the current clipboard offer.
+	clipFormats   []string
+	lastKeySerial uint32
+	keymap        *keymap
+	keyboard      *client.Keyboard
 	// enterCode is the keysym of the Enter key that is currently down, so its
 	// release can be delivered. Zero means Enter is not down.
 	enterCode          uint32
@@ -160,6 +167,7 @@ func Connect(state *State, onKey KeyFunc, frame FrameFunc) (*Client, error) {
 		ctx.Close()
 		return nil, fmt.Errorf("compositor exposes no compositor/shm/seat")
 	}
+	c.setupDataDevice()
 	if err := ctx.SetReadDeadline(time.Time{}); err != nil {
 		ctx.Close()
 		return nil, err
@@ -242,6 +250,15 @@ func (c *Client) global(g client.RegistryGlobalEvent) {
 						c.pointerOut = nil
 					}
 				})
+			}
+		}
+	case "wl_data_device_manager":
+		if c.dataMgr == nil {
+			o := client.NewDataDeviceManager(ctx)
+			// v3: wl_data_offer.destroy only exists from version 3, and we
+			// destroy superseded offers. All wlroots compositors have v3.
+			if bind(o, 3) == nil {
+				c.dataMgr = o
 			}
 		}
 	case "wp_viewporter":

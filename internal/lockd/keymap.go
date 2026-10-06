@@ -79,11 +79,12 @@ func (k *keymap) setMask(depressed, latched, locked, group uint32) {
 const (
 	modIndexShift = 0 // xkb modifier index: Shift
 	modIndexCaps  = 1 // index: Lock (Caps Lock)
+	modIndexCtrl  = 2 // xkb modifier index: Control
 )
 
-func (k *keymap) mods() (shift, caps bool) {
+func (k *keymap) mods() (shift, ctrl, caps bool) {
 	all := k.depressed | k.latched | k.locked
-	return all&(1<<modIndexShift) != 0, all&(1<<modIndexCaps) != 0
+	return all&(1<<modIndexShift) != 0, all&(1<<modIndexCtrl) != 0, all&(1<<modIndexCaps) != 0
 }
 
 // resolve maps an evdev code to keysym + printable text under the current
@@ -110,7 +111,7 @@ func (k *keymap) resolve(code uint32) (uint32, string) {
 			}
 		}
 	}
-	if shift, caps := k.mods(); caps && text != "" {
+	if shift, _, caps := k.mods(); caps && text != "" {
 		r, size := utf8.DecodeRuneInString(text)
 		if size == len(text) && unicode.IsLetter(r) {
 			if shift {
@@ -136,12 +137,12 @@ func printable(s string) string {
 	return s
 }
 func (k *keymap) indicators() Key {
-	shift, caps := k.mods()
+	shift, ctrl, caps := k.mods()
 	layout := k.mapData.GroupName(xkb.Group(k.group))
 	if layout == "" {
 		layout = "Group " + strconv.Itoa(int(k.group)+1)
 	}
-	return Key{Shift: shift, CapsLock: caps, NumLock: (k.depressed|k.latched|k.locked)&(1<<4) != 0, Layout: layout}
+	return Key{Shift: shift, Ctrl: ctrl, CapsLock: caps, NumLock: (k.depressed|k.latched|k.locked)&(1<<4) != 0, Layout: layout}
 }
 func (c *Client) updateModifiers(depressed, latched, locked, group uint32) {
 	if c.keymap == nil {
@@ -163,7 +164,7 @@ type keyRepeat struct {
 
 func (r *keyRepeat) press(code uint32, key Key, now time.Time) {
 	r.next = time.Time{}
-	if r.rate <= 0 || key.Enter || key.Escape || (key.Text == "" && !key.Backspace) {
+	if r.rate <= 0 || key.Enter || key.Escape || key.Ctrl || (key.Text == "" && !key.Backspace) {
 		return
 	}
 	r.code, r.key = code, key
@@ -214,6 +215,12 @@ func (c *Client) setupKeyboard() {
 	})
 	kbd.SetLeaveHandler(func(client.KeyboardLeaveEvent) {
 		c.repeat.next = time.Time{}
+		// The clipboard offer is invalid once we lose the keyboard; drop and
+		// destroy it (the bound manager is v3, so destroy is legal).
+		if c.clipOffer != nil {
+			_ = c.clipOffer.Destroy()
+		}
+		c.clipOffer, c.clipFormats = nil, nil
 		if c.keymap != nil && c.keymap.compose != nil {
 			c.keymap.compose.Reset()
 		}
@@ -238,6 +245,8 @@ func (c *Client) setupKeyboard() {
 		if c.keymap == nil {
 			return
 		}
+		// Paste must accept() with a serial from a keyboard event on this seat.
+		c.lastKeySerial = ev.Serial
 		sym, text := c.keymap.resolve(ev.Key)
 		k := c.keymap.indicators()
 		k.Text = text
@@ -276,6 +285,11 @@ func specials(sym uint32) (enter, up, down, f4 bool) {
 
 func (c *Client) repeatKey() Key {
 	k := c.keymap.indicators()
+	if k.Ctrl {
+		// Ctrl was added after the repeat armed; a repeating Ctrl+V would
+		// paste the clipboard on every tick. Ctrl combos never repeat.
+		return Key{Ctrl: true, CapsLock: k.CapsLock, NumLock: k.NumLock, Layout: k.Layout}
+	}
 	k.Backspace = c.repeat.key.Backspace
 	if c.repeat.key.composed {
 		k.Text = c.repeat.key.Text
