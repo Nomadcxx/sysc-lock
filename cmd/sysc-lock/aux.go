@@ -112,3 +112,9 @@ func (g *enterGate) pressMenu(m *input.Model, r *input.Reveal, k power.Key, menu
 func (g *enterGate) accept(generation uint64, phase lockd.Phase) bool {
 	return g.busy && g.generation == generation && phase == lockd.Locked
 }
+
+// armAmbient is true on the first Locked snapshot: the collector must not
+// run while the compositor is still deciding, and must not restart.
+func armAmbient(phase lockd.Phase, started bool) bool {
+	return !started && phase == lockd.Locked
+}

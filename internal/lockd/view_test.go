@@ -361,6 +361,22 @@ func TestMutedRoleMeetsTheHelpLineContrastFloor(t *testing.T) {
 	}
 }
 
+func TestHintStripSitsOnTheOutputNotInTheStack(t *testing.T) {
+	s := Layout(960, 720, 1, "", "12:59:59 PM")
+	if s.Help.Empty() {
+		t.Fatal("a 720p output has room for the hint")
+	}
+	if s.Help.Max.Y != 720-8 {
+		t.Fatalf("hint %v must sit on the output, 8px in from the edge", s.Help)
+	}
+	if !s.Ambient.Empty() && s.Help.Overlaps(s.Ambient) {
+		t.Fatal("hint overlaps the ambient row")
+	}
+	if s.Help.Overlaps(s.Backing) {
+		t.Fatal("hint overlaps the entry backing")
+	}
+}
+
 func TestHintStripAppearsWithTheEntryAndTheTextMatchesAvailability(t *testing.T) {
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	v := NewView(theme.Default(), "u", "h")
