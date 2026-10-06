@@ -38,3 +38,46 @@ func checkCandidate(path string) error {
 	}
 	return nil
 }
+
+// installDirs mirrors `install -d -m 0755 "$prefix/bin" "$prefix/share/systemd/user"`.
+func installDirs(prefix string) error {
+	for _, d := range []string{prefix + "/bin", prefix + "/share/systemd/user"} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			return err
+		}
+		if err := os.Chmod(d, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// installBinary mirrors `install -m 0755 candidate $prefix/bin/sysc-lock.new`
+// followed by `mv -f`; the rename is atomic like mv.
+func installBinary(prefix, candidate string) error {
+	data, err := os.ReadFile(candidate)
+	if err != nil {
+		return err
+	}
+	dst := prefix + "/bin/sysc-lock"
+	if err := os.WriteFile(dst+".new", data, 0755); err != nil {
+		return err
+	}
+	if err := os.Chmod(dst+".new", 0755); err != nil {
+		return err
+	}
+	return os.Rename(dst+".new", dst)
+}
+
+// ponytail: same semantics as the script's sed `s|ExecStart=.*|...|` — replaces
+// from "ExecStart=" to end of line, literal so $ in paths is safe.
+var execStartRe = regexp.MustCompile(`ExecStart=[^\n]*`)
+
+func installUnit(root, prefix string) error {
+	data, err := os.ReadFile(root + "/contrib/systemd/sysc-lock-session.service")
+	if err != nil {
+		return err
+	}
+	out := execStartRe.ReplaceAllLiteral(data, []byte("ExecStart="+prefix+"/bin/sysc-lock --session"))
+	return os.WriteFile(prefix+"/share/systemd/user/sysc-lock-session.service", out, 0644)
+}
