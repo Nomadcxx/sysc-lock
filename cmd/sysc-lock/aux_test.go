@@ -108,6 +108,17 @@ func TestHiddenEntryOnlyReveals(t *testing.T) {
 	}
 }
 
+func TestPasteInsertsOnAHiddenEntry(t *testing.T) {
+	m := &input.Model{}
+	var r input.Reveal
+	g := &enterGate{}
+	now := time.Unix(100, 0)
+	submit, err := g.press(m, &r, lockd.Key{Text: "from-clip", Paste: true}, now)
+	if submit || err != nil || m.Password() != "from-clip" {
+		t.Fatalf("paste must reveal and insert, got %q submit=%v err=%v", m.Password(), submit, err)
+	}
+}
+
 func TestEscapeWipesAndHides(t *testing.T) {
 	m := &input.Model{}
 	var r input.Reveal

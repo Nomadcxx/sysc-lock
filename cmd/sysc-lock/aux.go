@@ -86,7 +86,7 @@ func (g *enterGate) handle(m *input.Model, k lockd.Key) (bool, error) {
 func (g *enterGate) press(m *input.Model, r *input.Reveal, k lockd.Key, now time.Time) (bool, error) {
 	visible := g.visible(m, r, now, false)
 	r.Show(now)
-	if !visible {
+	if !visible && !k.Paste {
 		return false, nil
 	}
 	submit, err := g.handle(m, k)

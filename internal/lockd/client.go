@@ -24,6 +24,7 @@ type Key struct {
 	Backspace bool
 	Escape    bool
 	Shift     bool
+	Ctrl      bool
 	CapsLock  bool
 	NumLock   bool
 	Layout    string
@@ -31,6 +32,9 @@ type Key struct {
 	Up        bool
 	Down      bool
 	F4        bool
+	// Paste is a clipboard insert (Ctrl+V / Shift+Insert). Text is the
+	// payload; a hidden entry still receives it, unlike a typed first key.
+	Paste bool
 	// Released marks a key going up. Enter releases drive the hold-to-confirm
 	// bar, and the keyboard-leave event releases every key at once so a missed
 	// release can never leave a hold running.
@@ -79,6 +83,12 @@ type Client struct {
 	removed            []*lockOut
 	viewporter         *viewporter.WpViewporter
 	scaleManager       *fractionalscale.WpFractionalScaleManagerV1
+	dataMgr            *client.DataDeviceManager
+	dataDev            *client.DataDevice
+	clip               *client.DataOffer
+	clipMime           string
+	offerMimes         map[*client.DataOffer][]string
+	pasting            bool
 	effect, palette    string
 	wallpaper          *wallpaperAsset
 	reduced, frozen    bool
@@ -242,6 +252,15 @@ func (c *Client) global(g client.RegistryGlobalEvent) {
 						c.pointerOut = nil
 					}
 				})
+				c.setupClipboard()
+			}
+		}
+	case "wl_data_device_manager":
+		if c.dataMgr == nil {
+			o := client.NewDataDeviceManager(ctx)
+			if bind(o, 3) == nil {
+				c.dataMgr = o
+				c.setupClipboard()
 			}
 		}
 	case "wp_viewporter":

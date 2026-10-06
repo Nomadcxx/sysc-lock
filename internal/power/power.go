@@ -10,10 +10,12 @@ import "time"
 type Action string
 
 const (
-	Logout   Action = "logout"
-	Reboot   Action = "reboot"
-	Shutdown Action = "shutdown"
-	Cancel   Action = "cancel"
+	Logout    Action = "logout"
+	Reboot    Action = "reboot"
+	Shutdown  Action = "shutdown"
+	Suspend   Action = "suspend"
+	Hibernate Action = "hibernate"
+	Cancel    Action = "cancel"
 )
 
 // DefaultOrder is the menu order when the config says nothing.
@@ -43,6 +45,10 @@ func (a Action) Label() string {
 		return "Reboot"
 	case Shutdown:
 		return "Shutdown"
+	case Suspend:
+		return "Suspend"
+	case Hibernate:
+		return "Hibernate"
 	case Cancel:
 		return "Cancel"
 	}
@@ -59,6 +65,10 @@ func (a Action) Status() string {
 		return "Shutting down..."
 	case Logout:
 		return "Logging out..."
+	case Suspend:
+		return "Suspending..."
+	case Hibernate:
+		return "Hibernating..."
 	}
 	return ""
 }
@@ -69,7 +79,7 @@ func Normalize(in []Action) []Action {
 	out := make([]Action, 0, len(in))
 	for _, a := range in {
 		switch a {
-		case Logout, Reboot, Shutdown:
+		case Logout, Reboot, Shutdown, Suspend, Hibernate:
 		default:
 			continue
 		}
@@ -84,7 +94,7 @@ func Normalize(in []Action) []Action {
 
 // Availability is what logind permits for this acquisition. Log out is not
 // here: it needs a session id, not a Can* property.
-type Availability struct{ Reboot, Shutdown bool }
+type Availability struct{ Reboot, Shutdown, Suspend, Hibernate bool }
 
 // Menu is the popup state. Every entry point takes now so a test can inject
 // the clock; it is touched only from the owner loop.
@@ -108,9 +118,11 @@ type Key struct {
 // dropped without a session to terminate.
 func New(order []Action, avail Availability, session string) *Menu {
 	keep := map[Action]bool{
-		Logout:   session != "",
-		Reboot:   avail.Reboot,
-		Shutdown: avail.Shutdown,
+		Logout:    session != "",
+		Reboot:    avail.Reboot,
+		Shutdown:  avail.Shutdown,
+		Suspend:   avail.Suspend,
+		Hibernate: avail.Hibernate,
 	}
 	m := &Menu{session: session}
 	for _, a := range Normalize(order) {

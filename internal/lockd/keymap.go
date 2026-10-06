@@ -79,11 +79,12 @@ func (k *keymap) setMask(depressed, latched, locked, group uint32) {
 const (
 	modIndexShift = 0 // xkb modifier index: Shift
 	modIndexCaps  = 1 // index: Lock (Caps Lock)
+	modIndexCtrl  = 2 // index: Control
 )
 
-func (k *keymap) mods() (shift, caps bool) {
+func (k *keymap) mods() (shift, caps, ctrl bool) {
 	all := k.depressed | k.latched | k.locked
-	return all&(1<<modIndexShift) != 0, all&(1<<modIndexCaps) != 0
+	return all&(1<<modIndexShift) != 0, all&(1<<modIndexCaps) != 0, all&(1<<modIndexCtrl) != 0
 }
 
 // resolve maps an evdev code to keysym + printable text under the current
@@ -110,7 +111,7 @@ func (k *keymap) resolve(code uint32) (uint32, string) {
 			}
 		}
 	}
-	if shift, caps := k.mods(); caps && text != "" {
+	if shift, caps, _ := k.mods(); caps && text != "" {
 		r, size := utf8.DecodeRuneInString(text)
 		if size == len(text) && unicode.IsLetter(r) {
 			if shift {
@@ -136,12 +137,12 @@ func printable(s string) string {
 	return s
 }
 func (k *keymap) indicators() Key {
-	shift, caps := k.mods()
+	shift, caps, ctrl := k.mods()
 	layout := k.mapData.GroupName(xkb.Group(k.group))
 	if layout == "" {
 		layout = "Group " + strconv.Itoa(int(k.group)+1)
 	}
-	return Key{Shift: shift, CapsLock: caps, NumLock: (k.depressed|k.latched|k.locked)&(1<<4) != 0, Layout: layout}
+	return Key{Shift: shift, CapsLock: caps, Ctrl: ctrl, NumLock: (k.depressed|k.latched|k.locked)&(1<<4) != 0, Layout: layout}
 }
 func (c *Client) updateModifiers(depressed, latched, locked, group uint32) {
 	if c.keymap == nil {
@@ -248,6 +249,10 @@ func (c *Client) setupKeyboard() {
 		if k.Enter {
 			c.enterCode = ev.Key
 		}
+		if pasteChord(k.Ctrl, k.Shift, sym) {
+			c.requestPaste()
+			return
+		}
 		c.repeat.press(ev.Key, k, time.Now())
 		if !c.keymap.mapData.KeyRepeats(xkb.Keycode(ev.Key + 8)) {
 			c.repeat.next = time.Time{}
@@ -272,6 +277,20 @@ func specials(sym uint32) (enter, up, down, f4 bool) {
 		f4 = true
 	}
 	return
+}
+
+const (
+	symInsert   = 0xff63
+	symKPInsert = 0xff9e
+)
+
+// pasteChord is Ctrl+V or Shift+Insert. A compositor with no data device
+// still reports the chord; requestPaste is then a no-op.
+func pasteChord(ctrl, shift bool, sym uint32) bool {
+	if ctrl && (sym == 'v' || sym == 'V') {
+		return true
+	}
+	return shift && !ctrl && (sym == symInsert || sym == symKPInsert)
 }
 
 func (c *Client) repeatKey() Key {
