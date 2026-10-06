@@ -1,6 +1,7 @@
 package lockd
 
 import (
+	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"image"
 	"image/color"
 	"image/png"
@@ -239,5 +240,21 @@ func TestWallpaperDecorationEvictedBeforeForegroundAdmission(t *testing.T) {
 	}
 	if c.wallpaper != nil {
 		t.Fatal("wallpaper reservation displaced opaque surfaces")
+	}
+}
+func TestBlurBackdropReportsFrozenAndNeverSchedules(t *testing.T) {
+	c := &Client{blur: true, blurRadius: 24, outputs: map[OutputID]*lockOut{
+		1: {w: 2, h: 2, backdrop: &render.Framebuffer{Width: 1, Height: 1, Stride: 4, Pix: make([]byte, 4)}, blurW: 2, blurH: 2},
+	}}
+	if got := c.backgroundStatus(time.Now()); got != "frozen" {
+		t.Fatal("captured backdrop reported", got)
+	}
+	c.scheduleBackground(c.outputs[1], time.Now())
+	if c.outputs[1].background != nil {
+		t.Fatal("effect scheduled under a frozen backdrop")
+	}
+	c.outputs[1].backdrop, c.outputs[1].blurW, c.outputs[1].blurH = nil, 0, 0
+	if got := c.backgroundStatus(time.Now()); got != "fallback" {
+		t.Fatal("missed capture reported", got)
 	}
 }

@@ -248,3 +248,34 @@ func TestPowerActionsRoundTrip(t *testing.T) {
 		t.Fatalf("round trip %v", got.PowerActions)
 	}
 }
+
+func TestBlurBackdropDefaultsAndClamp(t *testing.T) {
+	if !Default().BlurBackdrop() || Default().BlurRadiusPx() != DefaultBlurRadius {
+		t.Fatal("blur defaults changed")
+	}
+	got, err := Load(writeConfig(t, `{"blur_radius":-5}`))
+	if err != nil || !got.BlurBackdrop() || got.BlurRadiusPx() != MinBlurRadius {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got, err = Load(writeConfig(t, `{"blur_radius":100}`))
+	if err != nil || got.BlurRadiusPx() != MaxBlurRadius {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got, err = Load(writeConfig(t, `{"blur_backdrop":false,"blur_radius":7}`))
+	if err != nil || got.BlurBackdrop() || got.BlurRadiusPx() != 7 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	c := writeConfig(t, `{"blur_backdrop":false,"blur_radius":7}`)
+	got, err = Load(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2 := filepath.Join(t.TempDir(), "config.json")
+	if err = Save(p2, got); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(p2)
+	if err != nil || !strings.Contains(string(raw), `"blur_backdrop"`) || !strings.Contains(string(raw), `"blur_radius"`) {
+		t.Fatalf("save dropped blur keys: %s %v", raw, err)
+	}
+}

@@ -209,6 +209,8 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	client.SetEffectRate(cfg.EffectFPS)
 	client.EnableBackground(cfg.Effect, cfg.Palette, cfg.ReducedMotion)
 	client.EnableWallpaper(os.Getenv("SYSC_LOCK_WALLPAPER"))
+	client.EnableBlur(cfg.BlurBackdrop(), cfg.BlurRadiusPx())
+	client.CaptureBlur()
 
 	if err := client.Lock(); err != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)

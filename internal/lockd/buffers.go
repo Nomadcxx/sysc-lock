@@ -44,6 +44,9 @@ func (c *Client) pixelBytes() int {
 		if out.background != nil {
 			total += out.background.storageBytes
 		}
+		if out.backdrop != nil {
+			total += len(out.backdrop.Pix)
+		}
 	}
 	for _, out := range c.outputs {
 		count(out)

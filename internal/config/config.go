@@ -23,6 +23,12 @@ const (
 	DefaultFPS = 20
 )
 
+const (
+	MinBlurRadius     = 0
+	MaxBlurRadius     = 64
+	DefaultBlurRadius = 24
+)
+
 type Config struct {
 	Effect        string `json:"effect"`
 	Palette       string `json:"palette"`
@@ -32,9 +38,25 @@ type Config struct {
 	// EffectFPS is effect ticks per second. The effects advance one fixed step
 	// per tick, so it also scales animation speed.
 	EffectFPS int `json:"effect_fps"`
+	// BlurBackdrop captures and blurs the desktop once at lock. Nil means
+	// the default (enabled); SYSC_LOCK_WALLPAPER overrides it either way.
+	Blur *bool `json:"blur_backdrop"`
+	// BlurRadius is the box-blur radius in pixels, clamped to [0,64].
+	BlurRadius *int `json:"blur_radius"`
 	// PowerActions is the ordered Power Options menu. An empty list removes
 	// the menu, the F4 hint and the help-line mention.
 	PowerActions []power.Action `json:"power_actions"`
+}
+
+// BlurBackdrop reports whether the frozen blurred backdrop is wanted.
+func (c Config) BlurBackdrop() bool { return c.Blur == nil || *c.Blur }
+
+// BlurRadiusPx returns the configured radius clamped to [0,64].
+func (c Config) BlurRadiusPx() int {
+	if c.BlurRadius == nil {
+		return DefaultBlurRadius
+	}
+	return min(max(*c.BlurRadius, 0), MaxBlurRadius)
 }
 
 func Default() Config {
