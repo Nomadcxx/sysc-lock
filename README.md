@@ -52,10 +52,11 @@ is supported. Conflicting or stale registration fails explicitly.
 Presentation loads `$XDG_CONFIG_HOME/sysc-lock/config.json` at each acquisition:
 
 ```json
-{"effect":"rain","palette":"nord","reduced_motion":false,"clock_style":"kompaktblk","clock_24h":false,"effect_fps":20,"power_actions":["logout","reboot","shutdown"]}
+{"effect":"rain","palette":"nord","reduced_motion":false,"clock_style":"kompaktblk","clock_24h":false,"effect_fps":20,"blur_backdrop":true,"blur_radius":24,"power_actions":["logout","reboot","shutdown"]}
 ```
 
-`clock_style` is `kompaktblk`, `phm_blocky_reverse` or `plain`; an unknown
+`clock_style` is `kompaktblk`, `phm_blocky_reverse`, `phmvga`, `phm_slanted`
+or `plain`; an unknown
 value uses `kompaktblk`. `effect_fps` is effect ticks per second (10–120); the
 effects advance one fixed step per tick, so it also changes animation speed.
 The screen shows the clock until a key is pressed; that key only reveals the
@@ -78,6 +79,12 @@ sysc-terminal revision; wallpaper/invalid-effect failures use an opaque fallback
 selects a static PNG/JPEG instead of the effect. The worker decodes it once per
 acquisition and scales it when output geometry changes. Files above 16 MiB or
 4 million pixels use the solid fallback; decoded assets share the pixel budget.
+`blur_backdrop` (default true) grabs one picture of each output through
+`zwlr_screencopy_manager_v1` before the lock takes the screen, downsamples and
+box-blurs it once (`blur_radius`, 0-64, default 24) and freezes it as the
+backdrop; effects never animate behind it. A compositor without screencopy, a
+refused capture or `SYSC_LOCK_WALLPAPER` keeps the previous behaviour. Pixels
+stay in memory and are wiped when the acquisition ends.
 The owner resolves the PAM account once per acquisition from the real UID.
 
 The CLI prints `sysc-lock: locked` on a sealed snapshot and returns success only

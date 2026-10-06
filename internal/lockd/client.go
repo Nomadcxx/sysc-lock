@@ -3,6 +3,7 @@ package lockd
 import (
 	"fmt"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/fractionalscale"
+	"github.com/Nomadcxx/sysc-lock/internal/lockd/screencopy"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/viewporter"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"os"
@@ -71,8 +72,12 @@ type Client struct {
 	// clipFormats is the mime list of the current clipboard offer.
 	clipFormats   []string
 	lastKeySerial uint32
-	keymap        *keymap
-	keyboard      *client.Keyboard
+
+	screencopy *screencopy.ZwlrScreencopyManagerV1
+	blur       bool
+	blurRadius int
+	keymap     *keymap
+	keyboard   *client.Keyboard
 	// enterCode is the keysym of the Enter key that is currently down, so its
 	// release can be delivered. Zero means Enter is not down.
 	enterCode          uint32
@@ -120,6 +125,8 @@ type lockOut struct {
 	callback           *client.Callback
 	lastFrame          time.Time
 	background         *backgroundWorker
+	backdrop           *render.Framebuffer
+	blurW, blurH       int
 }
 
 type shmBuffer struct {
@@ -260,6 +267,15 @@ func (c *Client) global(g client.RegistryGlobalEvent) {
 			// destroy superseded offers. All wlroots compositors have v3.
 			if bind(o, 3) == nil {
 				c.dataMgr = o
+			}
+		}
+	case screencopy.ZwlrScreencopyManagerV1InterfaceName:
+		// The backdrop is decoration: a compositor without this protocol
+		// keeps its effect or solid fill, so the bind is best-effort.
+		if c.screencopy == nil {
+			p := screencopy.NewZwlrScreencopyManagerV1(ctx)
+			if bind(p, 3) == nil {
+				c.screencopy = p
 			}
 		}
 	case "wp_viewporter":
@@ -489,6 +505,10 @@ func (c *Client) paint(out *lockOut) {
 		return
 	}
 	pixels := out.backgroundPixels()
+	if pixels == nil && out.backdrop != nil && out.blurW == out.w && out.blurH == out.h {
+		out.upscaleBackdrop(sb.data)
+		pixels = sb.data
+	}
 	fb := &render.Framebuffer{Width: out.w, Height: out.h, Stride: out.w * 4, Pix: sb.data}
 	if err = c.frame(fb, scale, pixels); err != nil {
 		c.failUI(err)
@@ -592,6 +612,10 @@ func (c *Client) freeBuffer(out *lockOut, sb *shmBuffer) {
 
 func (c *Client) destroyOut(out *lockOut) {
 	out.removed = true
+	if out.backdrop != nil {
+		clear(out.backdrop.Pix)
+		out.backdrop = nil
+	}
 	if out.background != nil {
 		out.background.stop()
 	}

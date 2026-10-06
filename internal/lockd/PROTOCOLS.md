@@ -21,3 +21,16 @@ go run github.com/Nomadcxx/sysc-wayland/cmd/sysc-wayland-scanner@v0.3.1 -pkg vie
 
 Review the generated diff and run the lockd checks. Keep sysc-lock's existing
 Wayland runtime pin when regenerating.
+
+## zwlr-screencopy-unstable-v1
+
+`protocols/wlr-screencopy-unstable-v1.xml` is copied verbatim from the
+sysc-shell repository (SHA-256
+`131b8f9b4aad0c8a9cf705e90d2a1511a5ca0c477637fd3400cf1cc4fa963fb8`). The
+binding is version 3, used only to grab one pre-lock picture per output with
+`overlay_cursor` set to 0; a compositor without the global simply keeps the
+plain fallback. Regenerate with:
+
+```sh
+go run github.com/Nomadcxx/sysc-wayland/cmd/sysc-wayland-scanner@v0.3.1 -pkg screencopy -o screencopy/screencopy.go -i ../../protocols/wlr-screencopy-unstable-v1.xml
+```
