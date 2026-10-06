@@ -341,3 +341,20 @@ func TestAmbientRowReadsOncePerSecond(t *testing.T) {
 		t.Fatalf("a second later: got %q, want refreshed %q", got, want)
 	}
 }
+
+func TestEnterReleaseNeverSubmits(t *testing.T) {
+	m := &input.Model{}
+	if err := m.Append("secret"); err != nil {
+		t.Fatal(err)
+	}
+	g := &enterGate{}
+	if submit, err := g.handle(m, lockd.Key{Enter: true, Released: true}); submit || err != nil {
+		t.Fatal("Enter key-up started auth (issue #10)")
+	}
+	if g.busy {
+		t.Fatal("Enter key-up armed the gate")
+	}
+	if m.Password() != "secret" {
+		t.Fatal("Enter key-up changed the entry")
+	}
+}
