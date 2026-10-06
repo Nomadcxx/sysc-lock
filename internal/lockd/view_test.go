@@ -22,8 +22,8 @@ func TestErrorAutoClear4s(t *testing.T) {
 	if got := v.StatusLine(t0.Add(3 * time.Second)); got != "Incorrect password" {
 		t.Fatalf("at +3s: %q", got)
 	}
-	if got := v.StatusLine(t0.Add(5 * time.Second)); got != "" {
-		t.Fatalf("at +5s: %q, want cleared", got)
+	if got := v.StatusLine(t0.Add(4 * time.Second)); got != "" {
+		t.Fatalf("at 4s: %q, want cleared", got)
 	}
 }
 
@@ -374,6 +374,16 @@ func TestHintStripSitsOnTheOutputNotInTheStack(t *testing.T) {
 	}
 	if s.Help.Overlaps(s.Backing) {
 		t.Fatal("hint overlaps the entry backing")
+	}
+}
+
+func TestBackingStopsAtTheStatusLine(t *testing.T) {
+	s := Layout(960, 720, 1, "", "12:59:59 PM")
+	if s.Ambient.Empty() {
+		t.Fatal("a 720p output has an ambient slot")
+	}
+	if s.Backing.Max.Y > s.Ambient.Min.Y {
+		t.Fatalf("backing %v bleeds into ambient %v", s.Backing, s.Ambient)
 	}
 }
 

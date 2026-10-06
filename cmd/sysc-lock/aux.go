@@ -64,7 +64,7 @@ func (g *enterGate) try(hasEntry bool) bool {
 func (g *enterGate) release() { g.busy = false }
 
 func (g *enterGate) handle(m *input.Model, k lockd.Key) (bool, error) {
-	if g.busy {
+	if g.busy || k.Released {
 		return false, nil
 	}
 	switch {
@@ -84,7 +84,7 @@ func (g *enterGate) handle(m *input.Model, k lockd.Key) (bool, error) {
 // and never reaches the password buffer. Any key restarts the idle timer. Esc
 // clears the field and hides the entry unless a verification is running.
 func (g *enterGate) press(m *input.Model, r *input.Reveal, k lockd.Key, now time.Time) (bool, error) {
-	visible := g.visible(m, r, now)
+	visible := g.visible(m, r, now, false)
 	r.Show(now)
 	if !visible {
 		return false, nil
@@ -96,8 +96,8 @@ func (g *enterGate) press(m *input.Model, r *input.Reveal, k lockd.Key, now time
 	return submit, err
 }
 
-func (g *enterGate) visible(m *input.Model, r *input.Reveal, now time.Time) bool {
-	return r.Tick(now, len(m.Pass) > 0 || g.busy)
+func (g *enterGate) visible(m *input.Model, r *input.Reveal, now time.Time, hold bool) bool {
+	return r.Tick(now, hold || len(m.Pass) > 0 || g.busy)
 }
 
 func (g *enterGate) pressMenu(m *input.Model, r *input.Reveal, k power.Key, menu *power.Menu, now time.Time) (bool, error) {

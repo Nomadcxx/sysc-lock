@@ -93,7 +93,7 @@ func (v *View) StatusLine(now time.Time) string {
 	if v.errMsg == "" {
 		return ""
 	}
-	if !v.errTerm && now.After(v.errUntil) {
+	if !v.errTerm && !now.Before(v.errUntil) {
 		v.errMsg = ""
 	}
 	return v.errMsg
@@ -247,15 +247,16 @@ func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectang
 			fillRect(fb, image.Rect(inner.Min.X+i*step, y, inner.Min.X+i*step+sq, y+sq), panelInk)
 		}
 	}
-	parts := []string{v.User}
-	if v.Layout != "" {
-		parts = append(parts, v.Layout)
-	}
+	parts := []string{}
 	if v.Caps {
 		parts = append(parts, "Caps Lock")
 	}
 	if v.Num {
 		parts = append(parts, "Num Lock")
+	}
+	parts = append(parts, v.User)
+	if v.Layout != "" {
+		parts = append(parts, v.Layout)
 	}
 	drawTextBox(fb, indicators, indicators.Min.Y+indicators.Dy()*3/4, strings.Join(parts, " • "), v.textPx(indicators.Dy()*3/5, indicators), panelInk)
 }

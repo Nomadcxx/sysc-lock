@@ -109,7 +109,8 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	y += entryH
 	s.Indicators = image.Rect(x, y, x+entryW, y+lineH)
 	s.Status = image.Rect(x, y+lineH, x+entryW, y+2*lineH)
-	s.Backing = image.Rect(x, s.Entry.Min.Y, x+entryW, s.Status.Max.Y).Inset(-px(6))
+	pad := px(6)
+	s.Backing = image.Rect(x-pad, s.Entry.Min.Y-pad, x+entryW+pad, s.Status.Max.Y)
 	if ambientH > 0 {
 		s.Ambient = image.Rect(x, y+2*lineH, x+entryW, y+3*lineH)
 	}
