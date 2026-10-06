@@ -19,6 +19,8 @@ func effectShaders(effect string) (step, draw string, ok bool) {
 		return nullStepFS, fireFS, true
 	case "fireworks":
 		return nullStepFS, fireworksFS, true
+	case "beams":
+		return nullStepFS, beamsFS, true
 	}
 	return "", "", false
 }
