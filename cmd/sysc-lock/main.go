@@ -104,7 +104,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			client.Repaint()
 			return
 		}
-		if !gate.visible(model, &view.Reveal, now) {
+		if !gate.visible(model, &view.Reveal, now, menu.Open() || view.Powering != "") {
 			gate.press(model, &view.Reveal, k, now)
 			client.Repaint()
 			return
@@ -134,7 +134,8 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		} else {
 			view.Hint = power.ScreenHelpPlain
 		}
-		view.Ambient = row.Get(now, max(8, lockd.Layout(fb.Width, fb.Height, scale, view.StyleName, "12:59:59 PM").Entry.Dx()/8))
+		cell := max(8, int(8*view.TextScale))
+		view.Ambient = row.Get(now, max(8, lockd.Layout(fb.Width, fb.Height, scale, view.StyleName, "12:59:59 PM").Entry.Dx()/cell))
 		if background == nil {
 			view.Render(fb, now)
 		} else {
