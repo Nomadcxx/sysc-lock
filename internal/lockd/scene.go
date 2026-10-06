@@ -114,8 +114,9 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 		s.Ambient = image.Rect(x, y+2*lineH, x+entryW, y+3*lineH)
 	}
 	if helpH > 0 {
-		y += 2*lineH + ambientH + unit
-		s.Help = image.Rect(x, y, x+entryW, y+lineH)
+		// Greet chrome: the hint sits on the output, not in the clock stack.
+		yHelp := height - margin - lineH
+		s.Help = image.Rect(x, yHelp, x+entryW, yHelp+lineH)
 	}
 	menuW := min(max(px(320), entryW), max(1, width-2*margin))
 	menuH := min(px(180), max(1, height-2*margin))

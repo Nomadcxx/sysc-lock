@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	openMeteoURL    = "https://api.open-meteo.com/v1/forecast"
-	weatherTimeout  = 2 * time.Second
-	weatherMaxBody  = 64 << 10
-	weatherCacheTTL = 15 * time.Minute
+	openMeteoURL        = "https://api.open-meteo.com/v1/forecast"
+	weatherTimeout      = 2 * time.Second
+	weatherMaxBody      = 64 << 10
+	weatherCacheTTL     = 15 * time.Minute
+	weatherFailureRetry = 30 * time.Second
 )
 
 // ParseWeatherConfig reads the sysc-shell config's weather block. Only
@@ -50,8 +51,13 @@ func FetchTemp(base string, lat, lon float64, unit string) (float64, error) {
 	if strings.EqualFold(unit, "fahrenheit") {
 		url += "&temperature_unit=fahrenheit"
 	}
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("User-Agent", "sysc-lock")
 	client := &http.Client{Timeout: weatherTimeout}
-	resp, err := client.Get(url)
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -88,9 +94,14 @@ type Weather struct {
 }
 
 // Get returns the cached temperature when fresh, otherwise fetches. A failed
-// fetch omits weather; a recent failure is not retried until the cache TTL.
+// fetch omits weather and is retried after weatherFailureRetry, not the
+// success TTL.
 func (w *Weather) Get(now time.Time) (float64, bool) {
-	if !w.fetchedAt.IsZero() && now.Sub(w.fetchedAt) < weatherCacheTTL {
+	fresh := weatherCacheTTL
+	if !w.ok {
+		fresh = weatherFailureRetry
+	}
+	if !w.fetchedAt.IsZero() && now.Sub(w.fetchedAt) < fresh {
 		return w.temp, w.ok
 	}
 	temp, err := FetchTemp(w.base, w.lat, w.lon, w.unit)

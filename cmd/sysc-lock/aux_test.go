@@ -285,6 +285,15 @@ func TestLoadAmbientGoodFile(t *testing.T) {
 	}
 }
 
+func TestArmAmbientOnlyAfterLocked(t *testing.T) {
+	if armAmbient(lockd.Requesting, false) || armAmbient(lockd.Locked, true) {
+		t.Fatal("must not start before Locked, or twice")
+	}
+	if !armAmbient(lockd.Locked, false) {
+		t.Fatal("first Locked event starts the collector")
+	}
+}
+
 func TestKillAmbientNilIsSafe(t *testing.T) {
 	t.Cleanup(killAmbient(nil))
 }
