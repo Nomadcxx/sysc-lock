@@ -13,9 +13,50 @@ func effectShaders(effect string) (step, draw string, ok bool) {
 	switch effect {
 	case "rain":
 		return rainStepFS, rainDrawFS, true
+	case "matrix":
+		return matrixStepFS, matrixDrawFS, true
 	}
 	return "", "", false
 }
+
+// effectFSHead is the shared preamble for the stateless draw shaders: the
+// uniform contract plus hash and the spec-legal constant-index palette
+// lookup. Uniforms a shader never references resolve to -1 and the Go side
+// skips them, so declaring the full set is free.
+const effectFSHead = `
+precision highp float;
+varying vec2 vUv;
+uniform vec3 uPalette[8];
+uniform int uSeed;
+uniform float uTime;
+uniform vec2 uGrid;
+
+float rhash(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+vec3 paletteAt(int k) {
+	vec3 c = uPalette[0];
+	for (int i = 0; i < 8; i++) {
+		if (i == k) {
+			c = uPalette[i];
+		}
+	}
+	return c;
+}
+`
+
+// nullStepFS is the step program for stateless effects: the frame is a pure
+// function of uTime, so the ping-pong state pair is allocated and stepped to
+// zero but never sampled.
+// ponytail: wasted w x h textures per lock; folding the state pass away for
+// stateless effects until someone cares about the memory.
+const nullStepFS = `
+precision highp float;
+void main() {
+	gl_FragColor = vec4(0.0);
+}
+`
 
 // effectVS is the shared fullscreen-triangle vertex shader; aPos is forced to
 // location 0 in buildProgram so one VBO setup serves every program.

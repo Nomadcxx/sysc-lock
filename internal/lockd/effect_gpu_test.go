@@ -7,12 +7,12 @@ import (
 	"testing"
 )
 
-func newTestGpuBackend(t *testing.T, w, h int) *gpuBackend {
+func newTestGpuBackend(t *testing.T, effect string, w, h int) *gpuBackend {
 	t.Helper()
 	if _, err := os.Stat("/dev/dri"); err != nil {
 		t.Skip("no render node")
 	}
-	b, err := newGpuBackend("rain", "nord", w, h)
+	b, err := newGpuBackend(effect, "nord", w, h)
 	if err != nil {
 		t.Skip("no usable EGL device:", err)
 	}
@@ -24,8 +24,79 @@ func newTestGpuBackend(t *testing.T, w, h int) *gpuBackend {
 	return gb
 }
 
+// gpuFrame renders one test frame of an effect: fresh backend, 20 steps,
+// draw at w x h.
+func gpuFrame(t *testing.T, effect string, w, h int) []byte {
+	t.Helper()
+	b := newTestGpuBackend(t, effect, w, h)
+	dst := make([]byte, w*h*4)
+	for i := 0; i < 20; i++ {
+		if err := b.Step(); err != nil {
+			t.Fatal(effect, err)
+		}
+	}
+	if err := b.Draw(dst, w*4); err != nil {
+		t.Fatal(effect, err)
+	}
+	if n := b.glErrors(); n != 0 {
+		t.Fatalf("%s: %d GL errors after the frame", effect, n)
+	}
+	return dst
+}
+
+// gpuEffectFrame asserts an effect paints an opaque frame with at least one
+// lit pixel.
+func gpuEffectFrame(t *testing.T, effect string) {
+	dst := gpuFrame(t, effect, 16, 16)
+	lit := 0
+	for i := 0; i < len(dst); i += 4 {
+		if dst[i+3] != 0xff {
+			t.Fatalf("%s pixel %d: alpha must be opaque, got 0x%02x", effect, i/4, dst[i+3])
+		}
+		if dst[i]|dst[i+1]|dst[i+2] != 0 {
+			lit++
+		}
+	}
+	if lit == 0 {
+		t.Fatalf("%s: 20 ticks produced an all-black frame", effect)
+	}
+}
+
+// gpuEffectDeterministic asserts two fresh backends with identical seeds
+// draw byte-identical frames, one alive at a time like the worker does.
+// CPU animations cannot serve as the reference: they draw from the global
+// math/rand source.
+func gpuEffectDeterministic(t *testing.T, effect string) {
+	const w, h = 16, 16
+	a := gpuFrameSerial(t, effect, w, h)
+	b := gpuFrameSerial(t, effect, w, h)
+	if !bytes.Equal(a, b) {
+		t.Fatalf("%s: two fresh backends with identical seeds drew different frames", effect)
+	}
+}
+
+func gpuFrameSerial(t *testing.T, effect string, w, h int) []byte {
+	t.Helper()
+	// Close explicitly before returning so the next frame gets a fresh
+	// context on this thread (the EGL context is current per thread).
+	b := newTestGpuBackend(t, effect, w, h)
+	dst := make([]byte, w*h*4)
+	for i := 0; i < 20; i++ {
+		if err := b.Step(); err != nil {
+			t.Fatal(effect, err)
+		}
+	}
+	if err := b.Draw(dst, w*4); err != nil {
+		t.Fatal(effect, err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(effect, err)
+	}
+	return dst
+}
+
 func TestGpuRedRoundTrip(t *testing.T) {
-	b := newTestGpuBackend(t, 2, 2)
+	b := newTestGpuBackend(t, "rain", 2, 2)
 	dst := make([]byte, 2*2*4)
 	if err := b.paintSolid([4]float32{1, 0, 0, 1}, dst, 2*4); err != nil {
 		t.Fatal(err)
@@ -44,7 +115,7 @@ func TestGpuRedRoundTrip(t *testing.T) {
 // row may be touched, and padding must keep whatever the caller left there.
 func TestGpuDrawHonorsStride(t *testing.T) {
 	const w, h, stride = 2, 3, 16
-	b := newTestGpuBackend(t, w, h)
+	b := newTestGpuBackend(t, "rain", w, h)
 	const sentinel = 0x77
 	dst := bytes.Repeat([]byte{sentinel}, h*stride)
 	if err := b.paintSolid([4]float32{1, 0, 0, 1}, dst, stride); err != nil {
@@ -130,34 +201,7 @@ func TestGpuBackendInit(t *testing.T) {
 	}
 }
 
-func TestGpuRainFrame(t *testing.T) {
-	const w, h = 16, 16
-	b := newTestGpuBackend(t, w, h)
-	dst := make([]byte, w*h*4)
-	for i := 0; i < 20; i++ {
-		if err := b.Step(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := b.Draw(dst, w*4); err != nil {
-		t.Fatal(err)
-	}
-	lit := 0
-	for i := 0; i < len(dst); i += 4 {
-		if dst[i+3] != 0xff {
-			t.Fatalf("pixel %d: alpha must be opaque, got 0x%02x", i/4, dst[i+3])
-		}
-		if dst[i]|dst[i+1]|dst[i+2] != 0 {
-			lit++
-		}
-	}
-	if lit == 0 {
-		t.Fatal("20 rain ticks produced an all-black frame")
-	}
-	if n := b.glErrors(); n != 0 {
-		t.Fatalf("%d GL errors after the frame", n)
-	}
-}
+func TestGpuRainFrame(t *testing.T) { gpuEffectFrame(t, "rain") }
 
 // GPU-vs-GPU determinism is the gate the CPU side can never offer: the
 // animations effects draw from the global math/rand, so two renderer
@@ -166,29 +210,9 @@ func TestGpuRainFrame(t *testing.T) {
 //
 // ponytail: identical only on one driver; cross-vendor float hashing may
 // differ. If a Mesa mediump flake shows up, relax to coverage-only.
-func TestGpuRainDeterministic(t *testing.T) {
-	const w, h = 16, 16
-	frame := func() []byte {
-		// One backend alive at a time: the EGL context is current on the
-		// constructing thread, exactly like the worker, which holds a single
-		// paint backend. Close is idempotent with the registered cleanup.
-		b := newTestGpuBackend(t, w, h)
-		dst := make([]byte, w*h*4)
-		for i := 0; i < 20; i++ {
-			if err := b.Step(); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := b.Draw(dst, w*4); err != nil {
-			t.Fatal(err)
-		}
-		if err := b.Close(); err != nil {
-			t.Fatal(err)
-		}
-		return dst
-	}
-	a, b := frame(), frame()
-	if !bytes.Equal(a, b) {
-		t.Fatal("two fresh rain backends with identical seeds drew different frames")
-	}
+func TestGpuRainDeterministic(t *testing.T) { gpuEffectDeterministic(t, "rain") }
+
+func TestGpuMatrixFrame(t *testing.T) {
+	gpuEffectFrame(t, "matrix")
+	gpuEffectDeterministic(t, "matrix")
 }
