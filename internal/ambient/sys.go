@@ -47,25 +47,46 @@ func ReadBattery(fs FS, root string) (int, bool, bool) {
 // classifies the interface wifi or wired by the presence of a wireless
 // child under sysNet/<iface>.
 func ReadLink(fs FS, procRoute, sysNet string) string {
+	if iface := ipv4Default(fs, procRoute); iface != "" {
+		return classifyLink(fs, sysNet, iface)
+	}
+	buf, err := fs.ReadFile(filepath.Join(filepath.Dir(procRoute), "ipv6_route"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(buf), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 10 || fields[9] == "lo" || fields[0] != strings.Repeat("0", 32) || fields[1] != "00" {
+			continue
+		}
+		return classifyLink(fs, sysNet, fields[9])
+	}
+	return ""
+}
+
+func ipv4Default(fs FS, procRoute string) string {
 	buf, err := fs.ReadFile(procRoute)
 	if err != nil {
 		return ""
 	}
-	lines := strings.Split(string(buf), "\n")
-	for _, line := range lines[1:] {
+	for _, line := range strings.Split(string(buf), "\n")[1:] {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || fields[1] != "00000000" || fields[0] == "lo" {
 			continue
 		}
-		entries, _ := fs.ReadDir(filepath.Join(sysNet, fields[0]))
-		for _, e := range entries {
-			if e == "wireless" {
-				return LinkWifi
-			}
-		}
-		return LinkWired
+		return fields[0]
 	}
 	return ""
+}
+
+func classifyLink(fs FS, sysNet, iface string) string {
+	entries, _ := fs.ReadDir(filepath.Join(sysNet, iface))
+	for _, e := range entries {
+		if e == "wireless" {
+			return LinkWifi
+		}
+	}
+	return LinkWired
 }
 
 // osFS is the production FS over the real kernel trees.
