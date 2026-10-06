@@ -8,7 +8,7 @@ import (
 )
 
 func TestStylesHaveEveryClockGlyph(t *testing.T) {
-	for _, name := range []string{"kompaktblk", "phm_blocky_reverse"} {
+	for _, name := range []string{"kompaktblk", "phm_blocky_reverse", "phmvga", "phm_slanted"} {
 		s := Lookup(name)
 		if s.Name != name || s.Rows == 0 || s.Plain() {
 			t.Fatalf("%s: %+v", name, s)
@@ -27,6 +27,9 @@ func TestStylesHaveEveryClockGlyph(t *testing.T) {
 			}
 		}
 	}
+	if Lookup("phmvga").Rows != 2 || Lookup("phm_slanted").Rows != 6 {
+		t.Fatal("row counts changed the layout contract")
+	}
 }
 
 func TestUnknownStyleFallsBackAndPlainHasNoGlyphs(t *testing.T) {
@@ -36,7 +39,7 @@ func TestUnknownStyleFallsBackAndPlainHasNoGlyphs(t *testing.T) {
 	if p := Lookup(Plain); !p.Plain() || p.Name != Plain {
 		t.Fatal(p)
 	}
-	if !reflect.DeepEqual(Names(), []string{"kompaktblk", "phm_blocky_reverse", "plain"}) {
+	if !reflect.DeepEqual(Names(), []string{"kompaktblk", "phm_blocky_reverse", "phmvga", "phm_slanted", "plain"}) {
 		t.Fatal(Names())
 	}
 }
@@ -87,8 +90,8 @@ func TestRectsLimitCountsDrawnCellsInReadingOrder(t *testing.T) {
 }
 
 func TestUnsupportedRuneDrawsNothing(t *testing.T) {
-	if Supported('🭊') || len(Rects([]string{"🭊"}, image.Point{}, 4, 8, -1)) != 0 {
-		t.Fatal("legacy-computing glyph must not draw")
+	if Supported('☃') || len(Rects([]string{"☃"}, image.Point{}, 4, 8, -1)) != 0 {
+		t.Fatal("unsupported glyph must not draw")
 	}
 }
 

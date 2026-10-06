@@ -24,7 +24,9 @@ type Style struct {
 }
 
 // Names lists the selectable styles.
-func Names() []string { return []string{"kompaktblk", "phm_blocky_reverse", Plain} }
+func Names() []string {
+	return []string{"kompaktblk", "phm_blocky_reverse", "phmvga", "phm_slanted", Plain}
+}
 
 // Lookup returns the named style, or the default when the name is unknown.
 func Lookup(name string) Style {
