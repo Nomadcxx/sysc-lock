@@ -2,7 +2,10 @@ package main
 
 import (
 	"errors"
+	"os"
 	"regexp"
+
+	"golang.org/x/sys/unix"
 	"strings"
 )
 
@@ -19,6 +22,19 @@ func validatePrefix(prefix string) error {
 	}
 	if !prefixChars.MatchString(prefix) {
 		return errors.New("prefix contains unsupported characters")
+	}
+	return nil
+}
+
+// checkCandidate mirrors the script's `[ -f candidate ] && [ -x candidate ]`.
+func checkCandidate(path string) error {
+	const msg = "candidate must be an executable regular file"
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() {
+		return errors.New(msg)
+	}
+	if err := unix.Access(path, unix.X_OK); err != nil {
+		return errors.New(msg)
 	}
 	return nil
 }
