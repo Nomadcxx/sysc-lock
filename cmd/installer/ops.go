@@ -2,8 +2,11 @@ package main
 
 import (
 	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
+	"strconv"
 
 	"golang.org/x/sys/unix"
 	"strings"
@@ -80,4 +83,58 @@ func installUnit(root, prefix string) error {
 	}
 	out := execStartRe.ReplaceAllLiteral(data, []byte("ExecStart="+prefix+"/bin/sysc-lock --session"))
 	return os.WriteFile(prefix+"/share/systemd/user/sysc-lock-session.service", out, 0644)
+}
+
+// ponytail: /proc scan is Linux-only, matching the target platform; a readlink
+// failure (ESRCH, EACCES, ENOENT) just means the entry is not ours to see.
+var procPath = "/proc"
+
+type lockOwner struct {
+	pid int
+	exe string
+}
+
+func runningLockOwners(bin string) []lockOwner {
+	entries, err := os.ReadDir(procPath)
+	if err != nil {
+		return nil
+	}
+	var owners []lockOwner
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		target, err := os.Readlink(procPath + "/" + e.Name() + "/exe")
+		if err != nil {
+			continue
+		}
+		if target == bin || target == bin+" (deleted)" {
+			owners = append(owners, lockOwner{pid: pid, exe: target})
+		}
+	}
+	return owners
+}
+
+func enabledUnitLinks() ([]string, error) {
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		base = home + "/.config"
+	}
+	return filepath.Glob(base + "/systemd/user/*.wants/sysc-lock-session.service")
+}
+
+func removeIfExists(path string) (bool, error) {
+	err := os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
