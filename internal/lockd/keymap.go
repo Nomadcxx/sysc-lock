@@ -23,6 +23,7 @@ const (
 	symUp        = 0xff52
 	symDown      = 0xff54
 	symF4        = 0xffc1
+	symInsert    = 0xff63
 )
 
 type keymap struct {
@@ -253,7 +254,7 @@ func (c *Client) setupKeyboard() {
 		k.composed = c.keymap.lastComposed
 		k.Backspace = sym == symBackspace
 		k.Escape = sym == symEscape
-		k.Enter, k.Up, k.Down, k.F4 = specials(sym)
+		k.Enter, k.Up, k.Down, k.F4, k.Insert = specials(sym)
 		if k.Enter {
 			c.enterCode = ev.Key
 		}
@@ -269,7 +270,7 @@ func (c *Client) setupKeyboard() {
 
 // specials reports the key flags a keysym carries. Nothing else in this file
 // knows the numeric keysyms, so the mapping is testable without a seat.
-func specials(sym uint32) (enter, up, down, f4 bool) {
+func specials(sym uint32) (enter, up, down, f4, insert bool) {
 	switch sym {
 	case symReturn, symKP_Enter:
 		enter = true
@@ -279,6 +280,8 @@ func specials(sym uint32) (enter, up, down, f4 bool) {
 		down = true
 	case symF4:
 		f4 = true
+	case symInsert:
+		insert = true
 	}
 	return
 }

@@ -32,6 +32,7 @@ type Key struct {
 	Up        bool
 	Down      bool
 	F4        bool
+	Insert    bool
 	// Released marks a key going up. Enter releases drive the hold-to-confirm
 	// bar, and the keyboard-leave event releases every key at once so a missed
 	// release can never leave a hold running.
