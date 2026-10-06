@@ -256,3 +256,32 @@ func TestRemoveIfExists(t *testing.T) {
 		t.Errorf("still there: %v", err)
 	}
 }
+
+func TestFindRepoRoot(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if _, err := findRepoRoot(); err == nil || err.Error() != "run the installer from inside a sysc-lock checkout" {
+		t.Fatalf("err = %v", err)
+	}
+	if err := os.MkdirAll(dir+"/contrib/systemd", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/go.mod", []byte("module github.com/Nomadcxx/sysc-lock\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/contrib/systemd/sysc-lock-session.service", []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sub := dir + "/cmd/installer"
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(sub)
+	root, err := findRepoRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root != dir {
+		t.Fatalf("root = %q, want %q", root, dir)
+	}
+}

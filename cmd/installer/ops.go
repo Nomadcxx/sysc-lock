@@ -138,3 +138,25 @@ func removeIfExists(path string) (bool, error) {
 	}
 	return true, nil
 }
+
+// findRepoRoot walks up from the CWD like scripts/install's caller: go.mod must
+// declare this module and the unit template must be present.
+func findRepoRoot() (string, error) {
+	const marker = "module github.com/Nomadcxx/sysc-lock\n"
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if data, err := os.ReadFile(dir + "/go.mod"); err == nil && strings.Contains(string(data), marker) {
+			if _, err := os.Stat(dir + "/contrib/systemd/sysc-lock-session.service"); err == nil {
+				return dir, nil
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", errors.New("run the installer from inside a sysc-lock checkout")
+		}
+		dir = parent
+	}
+}
