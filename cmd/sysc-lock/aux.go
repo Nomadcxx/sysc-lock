@@ -67,6 +67,12 @@ func (g *enterGate) handle(m *input.Model, k lockd.Key) (bool, error) {
 	if g.busy {
 		return false, nil
 	}
+	// A key going up never edits the entry. Only the power menu consumes
+	// releases (hold-to-confirm), and those arrive through pressMenu. Without
+	// this, releasing Enter after cancelling the popup submits the password.
+	if k.Released {
+		return false, nil
+	}
 	switch {
 	case k.Enter:
 		return g.try(len(m.Pass) > 0), nil
