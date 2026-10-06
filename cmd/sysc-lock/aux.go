@@ -80,6 +80,14 @@ func (g *enterGate) handle(m *input.Model, k lockd.Key) (bool, error) {
 			}
 		}
 		return false, nil
+	// Shift+Insert pastes too, the way the greet entry does.
+	case k.Insert:
+		if k.Shift && g.paste != nil {
+			if text := g.paste(); text != "" {
+				return false, m.Append(text)
+			}
+		}
+		return false, nil
 	case k.Enter:
 		return g.try(len(m.Pass) > 0), nil
 	case k.Backspace:

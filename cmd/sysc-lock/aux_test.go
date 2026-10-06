@@ -416,6 +416,23 @@ func TestCtrlVAppendsClipboard(t *testing.T) {
 	}
 }
 
+func TestShiftInsertAppendsClipboard(t *testing.T) {
+	m := &input.Model{}
+	g := &enterGate{paste: func() string { return "s3cr3t" }}
+	if submit, err := g.handle(m, lockd.Key{Shift: true, Insert: true}); submit || err != nil {
+		t.Fatal("Shift+Insert submitted auth")
+	}
+	if got := m.Password(); got != "s3cr3t" {
+		t.Fatalf("got: %q", got)
+	}
+	if _, err := g.handle(m, lockd.Key{Insert: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Password(); got != "s3cr3t" {
+		t.Fatalf("bare Insert typed: %q", got)
+	}
+}
+
 func TestCtrlCombosNeverType(t *testing.T) {
 	m := &input.Model{}
 	g := &enterGate{paste: func() string { return "x" }}
