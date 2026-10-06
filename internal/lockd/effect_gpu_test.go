@@ -216,3 +216,8 @@ func TestGpuMatrixFrame(t *testing.T) {
 	gpuEffectFrame(t, "matrix")
 	gpuEffectDeterministic(t, "matrix")
 }
+
+func TestGpuFireFrame(t *testing.T) {
+	gpuEffectFrame(t, "fire")
+	gpuEffectDeterministic(t, "fire")
+}
