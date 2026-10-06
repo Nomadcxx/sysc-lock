@@ -57,13 +57,23 @@ is supported. Conflicting or stale registration fails explicitly.
 Presentation loads `$XDG_CONFIG_HOME/sysc-lock/config.json` at each acquisition:
 
 ```json
-{"effect":"rain","palette":"nord","reduced_motion":false,"clock_style":"kompaktblk","clock_24h":false,"effect_fps":20,"blur_backdrop":true,"blur_radius":24,"power_actions":["logout","reboot","shutdown"]}
+{"effect":"rain","palette":"nord","reduced_motion":false,"clock_style":"kompaktblk","clock_24h":false,"effect_fps":20,"effect_backend":"auto","effect_gpu_power_save":true,"blur_backdrop":true,"blur_radius":24,"power_actions":["logout","reboot","shutdown"]}
 ```
 
 `clock_style` is `kompaktblk`, `phm_blocky_reverse`, `phmvga`, `phm_slanted`
 or `plain`; an unknown
 value uses `kompaktblk`. `effect_fps` is effect ticks per second (10–120); the
 effects advance one fixed step per tick, so it also changes animation speed.
+`effect_backend` picks who computes the frames: `cpu`, `gpu`, or `auto`
+(default). The GPU backend renders the same effects with EGL and OpenGL ES 2
+into the same shared-memory frames, so nothing on the wire changes; `auto`
+tries the GPU once per lock and pins the CPU for that lock after any init
+failure, draw error, or five consecutive frames slower than twice the frame
+interval, noting the drop on stderr. `effect_gpu_power_save` (default true)
+chooses the CPU outright while discharging and caps `effect_fps` at 30 for
+`auto` on battery. GPU pixels never leave the process. Building lockd needs
+EGL and GLES2 development headers; the linker flags are in the package.
+Exporting GPU buffers to the compositor (dmabuf) is a later phase, not this.
 The screen shows the clock until a key is pressed; that key only reveals the
 password entry. The entry hides again after 8 seconds when empty, or on Esc.
 Ctrl+V or Shift+Insert pastes the seat selection into the field when the
