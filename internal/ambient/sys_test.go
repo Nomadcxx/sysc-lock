@@ -2,6 +2,7 @@ package ambient
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -92,6 +93,20 @@ func TestReadLinkLoopbackOnly(t *testing.T) {
 		dirs: map[string][]string{"/net/lo": {"device"}},
 	}
 	if got := ReadLink(fs, "/route", "/net"); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestReadLinkIPv6Default(t *testing.T) {
+	zeros := strings.Repeat("0", 32)
+	fs := mapFS{
+		files: map[string]string{
+			"/route":      routeHeader,
+			"/ipv6_route": zeros + " 00 " + zeros + " 00 " + zeros + " 00000000 00000001 00000000 00000001 wlan0\n",
+		},
+		dirs: map[string][]string{"/net/wlan0": {"wireless", "device"}},
+	}
+	if got := ReadLink(fs, "/route", "/net"); got != LinkWifi {
 		t.Fatalf("got %q", got)
 	}
 }
