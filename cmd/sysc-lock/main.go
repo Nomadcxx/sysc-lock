@@ -148,6 +148,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
 		return lockd.Idle, err
 	}
+	gate.paste = client.Paste
 	stopSignals := make(chan struct{})
 	defer close(stopSignals)
 	go func() {
