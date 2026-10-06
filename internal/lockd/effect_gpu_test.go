@@ -231,3 +231,8 @@ func TestGpuBeamsFrame(t *testing.T) {
 	gpuEffectFrame(t, "beams")
 	gpuEffectDeterministic(t, "beams")
 }
+
+func TestGpuAquariumFrame(t *testing.T) {
+	gpuEffectFrame(t, "aquarium")
+	gpuEffectDeterministic(t, "aquarium")
+}
