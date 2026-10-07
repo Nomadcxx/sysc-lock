@@ -16,8 +16,8 @@ type effectPolicy struct {
 }
 
 // resolveEffectPolicy maps config choices to a runtime policy. battery is
-// injected so tests never touch /sys. auto pins CPU on battery power; the
-// power-save cap holds on-battery frames at 30fps or slower.
+// injected so tests never touch /sys. auto pins CPU while discharging; the
+// power-save cap holds those frames at 30fps or slower.
 func resolveEffectPolicy(backend string, powerSave bool, interval time.Duration, battery func() bool) effectPolicy {
 	p := effectPolicy{Interval: interval, MaxSlow: 5}
 	onBatt := powerSave && battery()
@@ -42,9 +42,11 @@ func (p effectPolicy) factory() backendFactory {
 	return newCpuBackend
 }
 
-// onBattery reports whether a battery is present and not fully charged.
-// ponytail: presence-based heuristic; charge-state edge cases can wait until
-// someone reports a wrong cap.
+// onBattery reports whether any battery is actively discharging. Charging,
+// full, and unknown statuses mean wall power: a plugged-in laptop should keep
+// the GPU path even under power-save.
+// ponytail: 'Not charging' counts as wall power; per-battery thresholds can
+// wait until someone reports a wrong pick.
 func onBattery(read func(string) ([]byte, error), glob func(string) ([]string, error)) bool {
 	names, err := glob("/sys/class/power_supply/BAT*")
 	if err != nil {
@@ -56,7 +58,7 @@ func onBattery(read func(string) ([]byte, error), glob func(string) ([]string, e
 			continue
 		}
 		status, err := read(filepath.Join(name, "status"))
-		if err == nil && strings.TrimSpace(string(status)) == "Full" {
+		if err != nil || strings.TrimSpace(string(status)) != "Discharging" {
 			continue
 		}
 		return true
