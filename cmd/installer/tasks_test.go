@@ -141,7 +141,7 @@ func TestRunnerCancelKillsGroup(t *testing.T) {
 	restoreFakes(t)
 	pidsFile := filepath.Join(t.TempDir(), "pids")
 	r := newRunner(testOpts(t), testLogger(t))
-	goCmd = fakeGoBuildSleep(pidsFile)
+	goCmd = fakeToolchain("fakecc", 0, fakeGoBuildSleep(pidsFile))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- r.runAll(ctx, nil) }()
