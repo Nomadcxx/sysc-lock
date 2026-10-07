@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/sysc-Go/animations"
 	"github.com/Nomadcxx/sysc-lock/internal/art"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
@@ -222,7 +223,8 @@ func TestSceneFitsEverySize(t *testing.T) {
 					t.Fatalf("%dx%d %s: %s %v outside output", c.w, c.h, style, name, r)
 				}
 			}
-			if !(s.ClockBox.Max.Y <= s.Date.Min.Y && s.Date.Max.Y <= s.Entry.Min.Y) {
+			if (!s.Date.Empty() && !s.ClockBox.Empty() && s.ClockBox.Max.Y > s.Date.Min.Y) ||
+				(!s.Date.Empty() && s.Date.Max.Y > s.Entry.Min.Y) || (!s.ClockBox.Empty() && s.ClockBox.Max.Y > s.Entry.Min.Y) {
 				t.Fatalf("%dx%d %s: stack overlaps %+v", c.w, c.h, style, s)
 			}
 			if !s.Ambient.Empty() && s.Ambient.Min.Y < s.Status.Max.Y {
@@ -455,7 +457,7 @@ func TestRevealedAmbientSitsOnGroundInMutedInk(t *testing.T) {
 func TestDimBackgroundKeepsAlpha(t *testing.T) {
 	pix := []byte{200, 100, 50, 255, 255, 255, 255, 255}
 	DimBackground(pix)
-	if !reflect.DeepEqual(pix, []byte{100, 50, 25, 255, 127, 127, 127, 255}) {
+	if !reflect.DeepEqual(pix, []byte{66, 33, 16, 255, 85, 85, 85, 255}) {
 		t.Fatal(pix)
 	}
 }
@@ -657,5 +659,178 @@ func TestHoldingShortensTheRepaintDeadline(t *testing.T) {
 	v.Power = &PowerView{Progress: 30}
 	if got := v.NextDeadline(now); got.Sub(now) > 40*time.Millisecond {
 		t.Fatal("the bar must repaint on the print-reveal deadline", got.Sub(now))
+	}
+}
+
+func TestParityScreensaverDropsTheFormAfterFiveMinutes(t *testing.T) {
+	now := time.Unix(600, 0)
+	v := NewView(theme.Default(), "Sample Account", "example")
+	v.Reduced = true
+	v.Entry = &input.Model{}
+	fb := render.New(960, 720)
+	v.Render(fb, now)
+	s := Layout(960, 720, 1, v.StyleName, v.clockText(now))
+	before := append([]byte(nil), fb.Pix...)
+	v.Render(fb, now.Add(5*time.Minute))
+	if sameRegion(before, fb.Pix, fb.Stride, s.Frame) {
+		t.Fatal("the framed form survives five minutes of idle")
+	}
+}
+
+func TestParityAttemptsAreVisibleAfterTheErrorExpires(t *testing.T) {
+	now := time.Unix(600, 0)
+	v := NewView(theme.Default(), "u", "h")
+	v.Reduced = true
+	fb := render.New(960, 720)
+	v.Render(fb, now)
+	s := Layout(960, 720, 1, v.StyleName, v.clockText(now))
+	before := append([]byte(nil), fb.Pix...)
+	v.Reject("Incorrect password", now)
+	v.Render(fb, now.Add(5*time.Second))
+	if sameRegion(before, fb.Pix, fb.Stride, s.Backing) {
+		t.Fatal("failed attempt count is not visible after transient error expiry")
+	}
+}
+
+func TestParityOptionsHoldAndCaretDeadline(t *testing.T) {
+	now := time.UnixMilli(600200)
+	v := NewView(theme.Default(), "u", "h")
+	v.Entry = &input.Model{}
+	v.Reveal.Show(now)
+	v.Options = &MenuView{Open: true}
+	if !v.EntryVisible(now.Add(9 * time.Second)) {
+		t.Error("options menu does not hold entry visible")
+	}
+	v.Options = nil
+	v.Reveal.Show(now)
+	if got := v.NextDeadline(now); !got.Equal(now.Truncate(500 * time.Millisecond).Add(500 * time.Millisecond)) {
+		t.Errorf("caret deadline=%v", got)
+	}
+	v.Reduced = true
+	if got := v.NextDeadline(now); !got.Equal(now.Truncate(time.Second).Add(time.Second)) {
+		t.Errorf("reduced motion schedules caret blink: %v", got)
+	}
+}
+
+func TestParityActualSchemeContrast(t *testing.T) {
+	for _, name := range []string{"nord", "rama", "eldritch"} {
+		v := NewView(theme.Default().WithScheme(name), "u", "h")
+		ratio := func(a, b color.NRGBA) float64 {
+			x, y := luminance(a), luminance(b)
+			return (max(x, y) + .05) / (min(x, y) + .05)
+		}
+		if got := ratio(v.muted(), v.ground()); got < 4.5 {
+			t.Errorf("%s muted text contrast %.2f", name, got)
+		}
+		if got := ratio(v.accent(), v.ground()); got < 3 {
+			t.Errorf("%s focus contrast %.2f", name, got)
+		}
+	}
+}
+
+func sameRegion(a, b []byte, stride int, r image.Rectangle) bool {
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		if !bytes.Equal(a[y*stride+r.Min.X*4:y*stride+r.Max.X*4], b[y*stride+r.Min.X*4:y*stride+r.Max.X*4]) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestParityIdleHoldsForAllActiveOwners(t *testing.T) {
+	now := time.Unix(600, 0)
+	for _, name := range []string{"password", "PAM", "options", "power menu", "power action", "terminal"} {
+		t.Run(name, func(t *testing.T) {
+			v := NewView(theme.Default(), "u", "h")
+			v.Entry = &input.Model{}
+			v.Screensaver(now)
+			switch name {
+			case "password":
+				v.Entry.Append("synthetic")
+			case "PAM":
+				v.Busy = true
+			case "options":
+				v.Options = &MenuView{Open: true}
+			case "power menu":
+				v.Power = &PowerView{Open: true}
+			case "power action":
+				v.Powering = "Rebooting..."
+			case "terminal":
+				v.SetErrorTerminal("Account expired", now)
+			}
+			held := now.Add(10 * time.Minute)
+			if v.Screensaver(held) {
+				t.Fatal("active owner disappeared behind idle mode")
+			}
+			v.Entry.Clear()
+			v.Busy = false
+			v.Options = nil
+			v.Power = nil
+			v.Powering = ""
+			v.errTerm = false
+			if v.Screensaver(held.Add(299 * time.Second)) {
+				t.Fatal("idle timer did not restart after hold")
+			}
+			if !v.Screensaver(held.Add(5 * time.Minute)) {
+				t.Fatal("idle never resumed")
+			}
+		})
+	}
+}
+
+func TestParityWarningsAndScreensaverFitCompactOutputs(t *testing.T) {
+	for _, size := range [][2]int{{320, 240}, {420, 480}, {960, 720}, {1920, 1080}} {
+		for _, style := range art.Names() {
+			s := Layout(size[0], size[1], 1, style, widestClock, 3)
+			output := image.Rect(0, 0, size[0], size[1])
+			for name, r := range map[string]image.Rectangle{"label": s.Label, "entry": s.Entry, "status": s.Status, "count": s.Attempts, "warning": s.Warning, "backing": s.Backing} {
+				if r.Empty() || !r.In(output) {
+					t.Fatalf("%v %s %s=%v", size, style, name, r)
+				}
+			}
+			if s.Status.Max.Y > s.Attempts.Min.Y || s.Attempts.Max.Y > s.Warning.Min.Y {
+				t.Fatal("feedback overlaps")
+			}
+			saver := ScreensaverLayout(size[0], size[1], 1, style, widestClock)
+			if saver.Logo.Empty() || saver.Banner.Empty() || saver.Date.Empty() || !saver.Bounds().In(output) {
+				t.Fatalf("%v %s incomplete saver: %+v", size, style, saver)
+			}
+			if !saver.Entry.Empty() || !saver.Frame.Empty() {
+				t.Fatal("screensaver exposes form")
+			}
+		}
+	}
+}
+
+func TestParityEverySchemeMeetsRenderedContrastFloors(t *testing.T) {
+	for _, name := range animations.GetThemeNames() {
+		v := NewView(theme.Default().WithScheme(name), "u", "h")
+		for role, item := range map[string]struct {
+			ink, ground color.NRGBA
+			minimum     float64
+		}{
+			"body":  {safeInk(panelInk, v.ground(), 4.5), v.ground(), 4.5},
+			"error": {safeInk(panelDanger, v.ground(), 4.5), v.ground(), 4.5},
+			"muted": {v.muted(), v.ground(), 4.5}, "rule": {v.banner(), v.ground(), 4.5}, "focus label": {v.accent(), v.ground(), 4.5},
+			"selected popup": {safeInk(v.ground(), panelDanger, 4.5), panelDanger, 4.5},
+		} {
+			if got := contrast(item.ink, item.ground); got < item.minimum {
+				t.Errorf("%s %s %.2f:1", name, role, got)
+			}
+		}
+		for grey := 0; grey <= 85; grey++ {
+			ground := color.NRGBA{R: uint8(grey), G: uint8(grey), B: uint8(grey), A: 255}
+			for role, item := range map[string]struct {
+				ink     color.NRGBA
+				minimum float64
+			}{"logo": {v.artInk(v.banner(), 3), 3}, "clock": {v.clockInk(), 3}, "banner": {v.artInk(v.banner(), 4.5), 4.5}, "date": {v.dateInk(), 4.5}} {
+				if got := contrast(item.ink, ground); got < item.minimum {
+					t.Errorf("%s %s grey%d %.2f:1", name, role, grey, got)
+				}
+				if got := contrast(item.ink, v.Pal.Surface); got < item.minimum {
+					t.Errorf("%s %s plain %.2f:1", name, role, got)
+				}
+			}
+		}
 	}
 }

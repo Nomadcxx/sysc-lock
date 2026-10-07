@@ -21,7 +21,7 @@ type Scene struct {
 	Logo        image.Rectangle
 	Frame, Rule image.Rectangle
 	// Label is the left-aligned field name above the entry row, greet-style;
-	// it drops with the frame.
+	// it survives the decorative frame when the output is compact.
 	Label    image.Rectangle
 	Clock    []string
 	ClockCW  int // 0: the plain style draws text inside ClockBox
@@ -31,6 +31,8 @@ type Scene struct {
 	// Entry, Indicators and Status are laid out even while the entry is hidden,
 	// so revealing it never moves anything.
 	Entry, Indicators, Status image.Rectangle
+	Attempts, Warning         image.Rectangle
+	Banner                    image.Rectangle
 	Backing                   image.Rectangle
 	// Menu is the Power Options popup, centred over the stack, and Help is the
 	// bottom hint strip. Both are laid out whether or not they are drawn, so
@@ -46,14 +48,14 @@ type Scene struct {
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
-	return s.Logo.Union(s.Frame).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient)
+	return s.Logo.Union(s.Frame).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient).Union(s.Banner)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
 // function of its arguments. The style steps down to a narrower one, then to
 // plain, rather than overflow; the ambient row drops first when the output is
 // too short, then the hint strip, then the logo, then the frame.
-func Layout(width, height int, scale float64, styleName, clockText string) Scene {
+func Layout(width, height int, scale float64, styleName, clockText string, attempts ...int) Scene {
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
 	}
@@ -72,15 +74,7 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 		unit = max(px(8), height/60)
 	}
 	s.Cell = max(unit, px(6))
-	logoW := min(width*9/10, max(1, width-2*margin))
-	logoH := logoW * art.LogoH / art.LogoW
-	if capH := max(1, height/5); logoH > capH {
-		logoH = capH
-		logoW = logoH * art.LogoW / art.LogoH
-	}
-	if logoH < px(16) || logoW < px(64) {
-		logoH, logoW = 0, 0
-	}
+	logoW, logoH := logoSize(width, height, scale)
 	gap := 2 * unit
 	tight := max(px(4), unit/2) // the header and date hug the clock
 	dateSize := max(px(24), unit*3/2)
@@ -89,6 +83,13 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	lineH := px(22)
 	helpH := lineH + unit // gap above the strip plus the strip itself
 	ambientH := lineH
+	attemptH, warningH := 0, 0
+	if len(attempts) > 0 && attempts[0] > 0 {
+		attemptH = lineH
+	}
+	if len(attempts) > 0 && attempts[0] >= 3 {
+		warningH = 2 * lineH
+	}
 	entryW := min(max(1, width-2*px(16)), max(px(260), clockW/2))
 	x := (width - entryW) / 2
 	padX := min(px(14), max(0, x-margin)) // greet form padding, clamped to the margin
@@ -98,7 +99,7 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	labelH := lineH   // the field-name row inside the frame
 	labelGap := px(4)
 	total := func() int {
-		t := ruleH + innerGap + labelH + labelGap + clockH + tight + dateH + 2*gap + entryH + 2*lineH + 2*padY + ambientH + helpH
+		t := ruleH + innerGap + labelH + labelGap + clockH + tight + dateH + 2*gap + entryH + 2*lineH + 2*padY + ambientH + helpH + attemptH + warningH
 		if logoH > 0 {
 			t += logoH + tight
 		}
@@ -115,7 +116,15 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	}
 	if total() > height-2*margin && ruleH > 0 {
 		// The form drops its frame before it drops the field itself.
-		ruleH, innerGap, labelH, labelGap, padX, padY = 0, 0, 0, 0, 0, 0
+		ruleH, innerGap, padX, padY = 0, 0, 0, 0
+	}
+	// Credentials and failure feedback survive before the clock and date.
+	if total() > height-2*margin {
+		dateH, tight = 0, 0
+	}
+	if total() > height-2*margin {
+		clockH, clockW, gap = 0, 0, 0
+		s.Clock, s.ClockCW = nil, 0
 	}
 	y := max(margin, (height-total())*2/5)
 	if logoH > 0 {
@@ -124,7 +133,9 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	}
 	s.ClockBox = image.Rect((width-clockW)/2, y, (width+clockW)/2, y+clockH)
 	y += clockH + tight
-	s.Date = image.Rect(0, y, width, y+dateH)
+	if dateH > 0 {
+		s.Date = image.Rect(0, y, width, y+dateH)
+	}
 	s.DateSize = dateSize
 	y += dateH + 2*gap
 	if ruleH > 0 {
@@ -139,6 +150,15 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	y += entryH
 	s.Indicators = image.Rect(x, y, x+entryW, y+lineH)
 	s.Status = image.Rect(x, y+lineH, x+entryW, y+2*lineH)
+	feedbackY := s.Status.Max.Y
+	if attemptH > 0 {
+		s.Attempts = image.Rect(x, feedbackY, x+entryW, feedbackY+attemptH)
+		feedbackY += attemptH
+	}
+	if warningH > 0 {
+		s.Warning = image.Rect(x, feedbackY, x+entryW, feedbackY+warningH)
+		feedbackY += warningH
+	}
 	top := s.Entry.Min.Y
 	if labelH > 0 {
 		top = s.Label.Min.Y
@@ -146,12 +166,12 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	if ruleH > 0 {
 		top = s.Rule.Min.Y
 	}
-	s.Backing = image.Rect(x, top, x+entryW, s.Status.Max.Y)
+	s.Backing = image.Rect(x, top, x+entryW, feedbackY)
 	if padX > 0 || padY > 0 {
-		s.Frame = image.Rect(x-padX, s.Backing.Min.Y-padY, x+entryW+padX, s.Status.Max.Y+padY)
+		s.Frame = image.Rect(x-padX, s.Backing.Min.Y-padY, x+entryW+padX, feedbackY+padY)
 	}
 	if ambientH > 0 {
-		ambY := s.Status.Max.Y + padY + px(6)
+		ambY := feedbackY + padY + px(6)
 		s.Ambient = image.Rect(x, ambY, x+entryW, ambY+lineH)
 	}
 	if helpH > 0 {
@@ -165,4 +185,53 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	my := min(s.Entry.Min.Y-(menuH-entryH)/2, height-margin-menuH)
 	s.Menu = image.Rect(mx, max(margin, my), mx+menuW, max(margin, my)+menuH)
 	return s
+}
+
+// ScreensaverLayout reuses the chosen clock and logo sizing without the form.
+func ScreensaverLayout(width, height int, scale float64, style, text string) Scene {
+	s := Layout(width, height, scale, style, text)
+	gap := max(4, int(8*s.Scale))
+	bannerH := max(16, int(22*s.Scale))
+	logoW, logoH := logoSize(width, height, s.Scale)
+	clockH, clockW := s.ClockBox.Dy(), s.ClockBox.Dx()
+	dateH := s.DateSize * 3 / 2
+	total := logoH + clockH + dateH + bannerH + 3*gap
+	if total > height-2*gap {
+		logoH, logoW = 0, 0
+		total = clockH + dateH + bannerH + 2*gap
+	}
+	if total > height-2*gap {
+		dateH = 0
+		total = clockH + bannerH + gap
+	}
+	s = Scene{Scale: s.Scale, Cell: s.Cell, Clock: s.Clock, ClockCW: s.ClockCW, DateSize: s.DateSize}
+	y := max(gap, (height-total)/2)
+	if logoH > 0 {
+		s.Logo = image.Rect((width-logoW)/2, y, (width+logoW)/2, y+logoH)
+		y += logoH + gap
+	}
+	s.Banner = image.Rect(gap, y, width-gap, y+bannerH)
+	y += bannerH + gap
+	s.ClockBox = image.Rect((width-clockW)/2, y, (width+clockW)/2, y+clockH)
+	y += clockH + gap
+	s.Date = image.Rectangle{}
+	if dateH > 0 {
+		s.Date = image.Rect(gap, y, width-gap, y+dateH)
+	}
+	return s
+}
+
+func logoSize(width, height int, scale float64) (int, int) {
+	px := func(n int) int { return max(1, int(float64(n)*scale)) }
+	margin := px(8)
+	logoW := min(width*9/10, max(1, width-2*margin))
+	logoH := logoW * art.LogoH / art.LogoW
+	if capH := max(1, height/5); logoH > capH {
+		logoH = capH
+		logoW = logoH * art.LogoW / art.LogoH
+	}
+	if logoH < px(16) || logoW < px(64) {
+		logoH, logoW = 0, 0
+	}
+	return logoW, logoH
 }
