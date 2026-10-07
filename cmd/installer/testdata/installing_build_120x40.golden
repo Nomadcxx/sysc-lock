@@ -1,0 +1,25 @@
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+                                                  sysc-lock installer                                                   
+
+
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                    │
+│    Check prefix                                                                                                    │
+│    Check toolchain                                                                                                 │
+│  ⣾  Building sysc-lock (CGO_ENABLED=1 go build)                                                                    │
+│    Check candidate                                                                                                 │
+│    Create directories                                                                                              │
+│    Install binary                                                                                                  │
+│    ├─ Copy to bin/sysc-lock.new                                                                                    │
+│    └─ Replace bin/sysc-lock                                                                                        │
+│    Install user unit                                                                                               │
+│                                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+                                                  Ctrl+C: Cancel build                                                  

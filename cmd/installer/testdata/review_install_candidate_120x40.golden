@@ -1,0 +1,24 @@
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+                                                  sysc-lock installer                                                   
+
+
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                    │
+│  Install into /home/test/.local                                                                                    │
+│  Source: /src/sysc-lock/build/sysc-lock                                                                            │
+│                                                                                                                    │
+│  Will write:                                                                                                       │
+│    /home/test/.local/bin/sysc-lock                                                                                 │
+│    /home/test/.local/share/systemd/user/sysc-lock-session.service                                                  │
+│                                                                                                                    │
+│  Change with --prefix PATH. Nothing is enabled or started; PAM and config are untouched.                           │
+│                                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+                                     Enter: Install  •  Esc: Back  •  Ctrl+C: Quit                                      

@@ -1,0 +1,21 @@
+                              sysc-lock installer                               
+╭────────────────────────────────────────────────────────────────────────────╮
+│    Check prefix                                                            │
+│    Check toolchain                                                         │
+│  [FAIL] Build sysc-lock                                                    │
+│    └─ Error: security/pam_appl.h: No such file or directory                │
+│    └─ Command: CGO_ENABLED=1 go build -o /tmp/sysc-lock-build-1842/sysc-…  │
+│    Check candidate                                                         │
+│    Create directories                                                      │
+│    Install binary                                                          │
+│    ├─ Copy to bin/sysc-lock.new                                            │
+│    └─ Replace bin/sysc-lock                                                │
+│    Install user unit                                                       │
+│                                                                            │
+│  Installation failed.                                                      │
+│  Full log: /tmp/sysc-lock-installer.log                                    │
+│                                                                            │
+│  Press Enter to exit                                                       │
+╰────────────────────────────────────────────────────────────────────────────╯
+
+                          Enter: Exit  •  Ctrl+C: Quit                          

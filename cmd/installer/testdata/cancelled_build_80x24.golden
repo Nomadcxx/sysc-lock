@@ -1,0 +1,21 @@
+                              sysc-lock installer                               
+╭────────────────────────────────────────────────────────────────────────────╮
+│    Check prefix                                                            │
+│    Check toolchain                                                         │
+│  [FAIL] Build sysc-lock                                                    │
+│    └─ Error: cancelled                                                     │
+│    └─ Command:                                                             │
+│    Check candidate                                                         │
+│    Create directories                                                      │
+│    Install binary                                                          │
+│    ├─ Copy to bin/sysc-lock.new                                            │
+│    └─ Replace bin/sysc-lock                                                │
+│    Install user unit                                                       │
+│                                                                            │
+│  Installation cancelled.                                                   │
+│  Full log: /tmp/sysc-lock-installer.log                                    │
+│                                                                            │
+│  Press Enter to exit                                                       │
+╰────────────────────────────────────────────────────────────────────────────╯
+
+                          Enter: Exit  •  Ctrl+C: Quit                          

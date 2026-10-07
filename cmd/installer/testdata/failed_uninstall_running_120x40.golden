@@ -1,0 +1,27 @@
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+                                                 sysc-lock uninstaller                                                  
+
+
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                    │
+│    Check prefix                                                                                                    │
+│  [FAIL] Check service                                                                                              │
+│    └─ Error: sysc-lock is running (pid 4242) from /home/test/.local/bin/sysc-lock: stop sysc-lock-session.servic…  │
+│    └─ Command:                                                                                                     │
+│    Remove user unit                                                                                                │
+│    Remove binary                                                                                                   │
+│                                                                                                                    │
+│  Uninstall failed.                                                                                                 │
+│  Full log: /tmp/sysc-lock-installer.log                                                                            │
+│                                                                                                                    │
+│  Press Enter to exit                                                                                               │
+│                                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+                                              Enter: Exit  •  Ctrl+C: Quit                                              
