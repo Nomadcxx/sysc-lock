@@ -21,9 +21,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      # The locker authenticates through PAM, so vet and test need its headers.
-      - name: install libpam
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpam0g-dev
+      # The locker authenticates through PAM and its GPU effect backend needs
+      # EGL/GLES headers, so vet, test and build all compile against them.
+      - name: install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpam0g-dev libegl1-mesa-dev libgles2-mesa-dev
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - name: vet

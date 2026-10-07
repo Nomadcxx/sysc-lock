@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/Nomadcxx/sysc-Go v1.0.4-0.20261004042739-c80d48f1f38e
-	github.com/Nomadcxx/sysc-terminal v0.0.0-20261004174459-4e522749ac8b
+	github.com/Nomadcxx/sysc-terminal v0.0.0-20261006055903-edd5206704ce
 	github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/msteinert/pam/v2 v2.1.0
