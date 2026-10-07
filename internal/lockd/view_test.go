@@ -17,6 +17,30 @@ import (
 	xdraw "golang.org/x/image/draw"
 )
 
+func TestCaretUsesFrameTimeAndHonorsReducedMotion(t *testing.T) {
+	v := NewView(theme.Default(), "user", "host")
+	fb := render.New(800, 600)
+	s := Layout(fb.Width, fb.Height, v.Scale, v.StyleName, v.clockText(time.UnixMilli(10_200)))
+	inner := s.Entry.Inset(max(2, int(8*s.Scale)))
+	sq := max(2, s.Entry.Dy()/4)
+	x, y := inner.Min.X+sq/2, s.Entry.Min.Y+s.Entry.Dy()/2
+	for _, reduced := range []bool{false, true} {
+		v.Reduced = reduced
+		for _, millis := range []int64{200, 700} {
+			now := time.UnixMilli(10_000 + millis)
+			v.Reveal.Show(now)
+			v.Render(fb, now)
+			want := v.ground()
+			if reduced || millis < 500 {
+				want = v.accent()
+			}
+			if got := fb.At(x, y); got != want {
+				t.Fatalf("reduced=%v frame=%dms: caret=%v, want %v", reduced, millis, got, want)
+			}
+		}
+	}
+}
+
 func TestLogoRenderingReusesScalingAndPreservesPixels(t *testing.T) {
 	v := NewView(theme.Default(), "user", "host")
 	fb, want := render.New(80, 40), render.New(80, 40)

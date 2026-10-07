@@ -220,7 +220,7 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	v.drawForm(fb, shift(s.Frame), shift(s.Backing), shift(s.Rule), s.Scale)
 	if visible {
 		v.drawLabel(fb, shift(s.Label))
-		v.drawEntry(fb, shift(s.Entry), shift(s.Indicators), s.Scale)
+		v.drawEntry(fb, shift(s.Entry), shift(s.Indicators), s.Scale, now)
 	}
 	if status != "" {
 		ink := panelDanger
@@ -256,7 +256,7 @@ func (v *View) drawLabel(fb *render.Framebuffer, r image.Rectangle) {
 
 // drawEntry draws the entry field inside the framed form, which owns the
 // border and the frost; the field itself stays frameless (greet minimal style).
-func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectangle, scale float64) {
+func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectangle, scale float64, now time.Time) {
 	inner := entry.Inset(max(2, int(8*scale)))
 	sq := max(2, entry.Dy()/4)
 	cy := entry.Min.Y + (entry.Dy()-sq)/2
@@ -277,7 +277,7 @@ func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectang
 		cursorX = inner.Min.X + n*step
 	}
 	// The greet input carries a blinking block cursor at the typing point.
-	if (time.Now().UnixMilli()/500)%2 == 0 && cursorX+sq <= inner.Max.X {
+	if (v.Reduced || (now.UnixMilli()/500)%2 == 0) && cursorX+sq <= inner.Max.X {
 		fillRect(fb, image.Rect(cursorX, cy, cursorX+sq, cy+sq), v.accent())
 	}
 	parts := []string{}
