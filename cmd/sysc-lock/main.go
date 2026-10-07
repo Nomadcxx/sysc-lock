@@ -41,8 +41,12 @@ func main() {
 		err = runSession()
 	case len(os.Args) == 2 && os.Args[1] == "--ambient":
 		err = runAmbient()
+	case len(os.Args) == 2 && os.Args[1] == "--preview":
+		err = runPreview(os.Stdin, os.Stdout)
+	case len(os.Args) == 2 && os.Args[1] == "--describe":
+		err = writeDescription(os.Stdout)
 	default:
-		err = fmt.Errorf("usage: sysc-lock [--session|--version|--ambient]")
+		err = fmt.Errorf("usage: sysc-lock [--session|--version|--ambient|--preview|--describe]")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)

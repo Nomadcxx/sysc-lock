@@ -89,16 +89,16 @@ func Default() Config {
 	return Config{Effect: EffectNone, Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS, PowerActions: append([]power.Action{}, power.DefaultOrder...)}
 }
 
-// validatePresentation accepts EffectNone as a palette-only setting; every
+// Validate accepts EffectNone as a palette-only setting; every
 // other effect must be one the renderer knows.
-func validatePresentation(effect, palette string) error {
-	if effect == EffectNone {
-		if animations.GetThemeMetadata(palette) == nil {
-			return fmt.Errorf("unknown palette %q", palette)
+func (c Config) Validate() error {
+	if c.Effect == EffectNone {
+		if animations.GetThemeMetadata(c.Palette) == nil {
+			return fmt.Errorf("unknown palette %q", c.Palette)
 		}
 		return nil
 	}
-	return renderer.Validate(effect, palette)
+	return renderer.Validate(c.Effect, c.Palette)
 }
 func Path() string {
 	dir, err := os.UserConfigDir()
@@ -162,10 +162,10 @@ func Load(path string) (Config, error) {
 		c.EffectFPS = max(MinFPS, min(MaxFPS, c.EffectFPS))
 	}
 	c.PowerActions = power.Normalize(c.PowerActions)
-	return c, validatePresentation(c.Effect, c.Palette)
+	return c, c.Validate()
 }
 func Save(path string, c Config) error {
-	if err := validatePresentation(c.Effect, c.Palette); err != nil {
+	if err := c.Validate(); err != nil {
 		return err
 	}
 	fields, err := read(path)
