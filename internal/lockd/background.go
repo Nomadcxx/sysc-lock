@@ -28,11 +28,12 @@ type backgroundWorker struct {
 	cached, spare backgroundFrame // owner-only
 	jobDeadline   time.Time       // owner-only
 	storageBytes  int             // reserved owner pixel accounting, includes one in-flight frame
+	interval      time.Duration   // resolved once for this worker, including the battery cap
 	demoted       bool            // set by the worker on GPU->CPU drop; readers sync via results
 }
 
 func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake func(), policy effectPolicy, newBackend backendFactory) *backgroundWorker {
-	b := &backgroundWorker{jobs: make(chan backgroundJob, 1), results: make(chan backgroundFrame, 1), stopped: make(chan struct{}), done: make(chan struct{})}
+	b := &backgroundWorker{jobs: make(chan backgroundJob, 1), results: make(chan backgroundFrame, 1), stopped: make(chan struct{}), done: make(chan struct{}), interval: policy.Interval}
 	go func() {
 		defer func() { close(b.done); wake() }()
 		defer func() {
@@ -152,6 +153,9 @@ const (
 )
 
 func (out *lockOut) effectDue(now time.Time, every time.Duration) bool {
+	if out.background != nil {
+		every = max(every, out.background.interval)
+	}
 	return out.lastFrame.IsZero() || now.Sub(out.lastFrame) >= every
 }
 

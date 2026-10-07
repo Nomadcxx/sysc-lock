@@ -73,6 +73,33 @@ func TestEffectRateSetsTheTickInterval(t *testing.T) {
 	}
 }
 
+func TestBackgroundPolicyPacesFrames(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		fps                     int
+		battery, powerSave, due bool
+		elapsed                 time.Duration
+	}{
+		{"battery caps 60fps", 60, true, true, false, 16 * time.Millisecond},
+		{"battery reaches capped deadline", 60, true, true, true, time.Second / 30},
+		{"AC keeps 60fps", 60, false, true, true, 16 * time.Millisecond},
+		{"disabled power saving keeps 60fps", 60, true, false, true, 16 * time.Millisecond},
+		{"battery preserves slower rate", 20, true, true, false, 34 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Client{}
+			c.SetEffectRate(tc.fps)
+			policy := resolveEffectPolicy("cpu", tc.powerSave, c.effectInterval(), func() bool { return tc.battery })
+			b := newBackgroundWorker("fire", "nord", nil, func() {}, policy, newCpuBackend)
+			t.Cleanup(func() { b.stop(); <-b.done })
+			out := &lockOut{lastFrame: time.Unix(10, 0), background: b}
+			if got := out.effectDue(out.lastFrame.Add(tc.elapsed), c.effectInterval()); got != tc.due {
+				t.Fatalf("due=%v, want %v with policy interval %v", got, tc.due, policy.Interval)
+			}
+		})
+	}
+}
+
 func TestBackgroundResizeReservesOldAndNewFrames(t *testing.T) {
 	b := &backgroundWorker{cached: backgroundFrame{pixels: make([]byte, 16)}, spare: backgroundFrame{pixels: make([]byte, 16), width: 2, height: 2}}
 	if got := b.jobStorage(4, 4); got != 96 {

@@ -126,6 +126,14 @@ func TestOnBatteryFakeFilesystem(t *testing.T) {
 	if !onBattery(read, glob) {
 		t.Fatal("discharging battery missed")
 	}
+	fs[filepath.Join(root, "BAT0", "status")] = "Charging\n"
+	if onBattery(read, glob) {
+		t.Fatal("charging battery treated as draining")
+	}
+	fs[filepath.Join(root, "BAT0", "status")] = "Not charging\n"
+	if onBattery(read, glob) {
+		t.Fatal("idle plugged-in battery treated as draining")
+	}
 	fs[filepath.Join(root, "BAT0", "status")] = "Full"
 	if onBattery(read, glob) {
 		t.Fatal("full battery treated as draining")
