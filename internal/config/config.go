@@ -80,7 +80,7 @@ func (c Config) BlurRadiusPx() int {
 }
 
 func Default() Config {
-	return Config{Effect: "rain", Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS, PowerActions: append([]power.Action{}, power.DefaultOrder...)}
+	return Config{Effect: "fire", Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS, PowerActions: append([]power.Action{}, power.DefaultOrder...)}
 }
 func Path() string {
 	dir, err := os.UserConfigDir()

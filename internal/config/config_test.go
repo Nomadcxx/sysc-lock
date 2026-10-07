@@ -106,7 +106,7 @@ func writeConfig(t *testing.T, body string) string {
 
 func TestPresentationDefaults(t *testing.T) {
 	c := Default()
-	if c.ClockStyle != "kompaktblk" || c.Clock24h || c.EffectFPS != DefaultFPS || DefaultFPS != 20 {
+	if c.Effect != "fire" || c.ClockStyle != "kompaktblk" || c.Clock24h || c.EffectFPS != DefaultFPS || DefaultFPS != 20 {
 		t.Fatalf("%+v", c)
 	}
 	got, err := Load(writeConfig(t, `{}`))
