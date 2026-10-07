@@ -10,12 +10,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Nomadcxx/sysc-Go/animations"
+
 	"github.com/Nomadcxx/sysc-lock/internal/ambient"
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/config"
 	"github.com/Nomadcxx/sysc-lock/internal/inhibit"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
+	"github.com/Nomadcxx/sysc-lock/internal/options"
 	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
@@ -85,6 +88,8 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	sessionID := os.Getenv("XDG_SESSION_ID")
 	row := &ambientRow{path: ambient.Path()}
 	menu := power.New(nil, power.Availability{}, sessionID)
+	opts := options.New(effectChoices(), animations.GetThemeNames(), config.Default().Effect, config.Default().Palette)
+	cfg := config.Default()
 	executor := power.Executor{Session: sessionID}
 	var client *lockd.Client
 	client, err = lockd.Connect(st, func(k lockd.Key) {
@@ -111,12 +116,32 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			client.Repaint()
 			return
 		}
-		if !gate.visible(model, &view.Reveal, now, menu.Open() || view.Powering != "") {
+		if !gate.visible(model, &view.Reveal, now, menu.Open() || opts.Open() || view.Powering != "") {
 			gate.press(model, &view.Reveal, k, now)
 			client.Repaint()
 			return
 		}
+		if opts.Open() || k.F1 {
+			menu.Close()
+			if changed := gate.pressOptions(&view.Reveal, optionsKey(k), opts, now); changed {
+				cfg.Effect, cfg.Palette = opts.Effect(), opts.Theme()
+				if err := config.Save(config.Path(), cfg); err != nil {
+					fmt.Fprintln(os.Stderr, "sysc-lock: options: save failed:", err)
+				}
+				view.Pal = view.Pal.WithScheme(cfg.Palette)
+				eff := cfg.Effect
+				if eff == config.EffectNone {
+					eff = ""
+				}
+				client.Post(func() {
+					client.ApplyPresentation(eff, cfg.Palette, cfg.ReducedMotion, cfg.BackendChoice(), cfg.GpuPowerSave())
+				})
+			}
+			client.Repaint()
+			return
+		}
 		if menu.Open() || k.F4 {
+			opts.Close()
 			gate.pressMenu(model, &view.Reveal, powerKeys(k), menu, now)
 			client.Repaint()
 			return
@@ -136,6 +161,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		view.Scale = scale
 		now := time.Now()
 		view.Power = powerFrame(menu, now)
+		view.Options = optionsFrame(opts)
 		if menu.Available() {
 			view.Hint = power.ScreenHelp
 		} else {
@@ -209,15 +235,22 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		}
 		return view.NextDeadline(now)
 	}
-	cfg, configErr := config.Load(config.Path())
-	if configErr != nil {
+	if loaded, configErr := config.Load(config.Path()); configErr != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock: invalid presentation config; using fallback")
 		cfg = config.Default()
 		cfg.ReducedMotion = true
+	} else {
+		cfg = loaded
 	}
+	opts.Set(cfg.Effect, cfg.Palette)
 	view.StyleName, view.Clock24, view.Reduced = cfg.ClockStyle, cfg.Clock24h, cfg.ReducedMotion
+	view.Pal = view.Pal.WithScheme(cfg.Palette)
+	effect := cfg.Effect
+	if effect == config.EffectNone {
+		effect = ""
+	}
 	client.SetEffectRate(cfg.EffectFPS)
-	client.EnableBackground(cfg.Effect, cfg.Palette, cfg.ReducedMotion, cfg.BackendChoice(), cfg.GpuPowerSave())
+	client.EnableBackground(effect, cfg.Palette, cfg.ReducedMotion, cfg.BackendChoice(), cfg.GpuPowerSave())
 	client.EnableWallpaper(os.Getenv("SYSC_LOCK_WALLPAPER"))
 	client.EnableBlur(cfg.BlurBackdrop(), cfg.BlurRadiusPx())
 	client.CaptureBlur()
@@ -360,4 +393,35 @@ func powerFrame(m *power.Menu, now time.Time) *lockd.PowerView {
 		p.Rows = append(p.Rows, lockd.PowerRow{Title: a.Label(), Selected: i == m.Selected()})
 	}
 	return p
+}
+
+func optionsKey(k lockd.Key) options.Key {
+	return options.Key{Up: k.Up, Down: k.Down, Left: k.Left, Right: k.Right, Enter: k.Enter, Escape: k.Escape, F1: k.F1, Released: k.Released}
+}
+
+func optionsFrame(o *options.Options) *lockd.MenuView {
+	if !o.Open() {
+		return nil
+	}
+	p := &lockd.MenuView{Open: true, Title: "Options", Help: "↑↓ Navigate • ←→ Change • Esc Close", Progress: -1}
+	for i, label := range o.Rows() {
+		p.Rows = append(p.Rows, lockd.PowerRow{Title: label, Selected: i == o.Selected()})
+	}
+	return p
+}
+
+// effectChoices is the menu's background list: none plus every scene effect;
+// text-based effects need session text and stay out of the lock screen.
+func effectChoices() []string {
+	text := map[string]bool{}
+	for _, n := range animations.GetTextBasedEffects() {
+		text[n] = true
+	}
+	out := []string{config.EffectNone}
+	for _, n := range animations.GetEffectNames() {
+		if !text[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }

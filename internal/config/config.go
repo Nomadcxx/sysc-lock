@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/Nomadcxx/sysc-terminal/renderer"
 	"io"
+
+	"github.com/Nomadcxx/sysc-Go/animations"
+	"github.com/Nomadcxx/sysc-terminal/renderer"
 
 	"github.com/Nomadcxx/sysc-lock/internal/art"
 	"github.com/Nomadcxx/sysc-lock/internal/power"
@@ -79,8 +81,24 @@ func (c Config) BlurRadiusPx() int {
 	return min(max(*c.BlurRadius, 0), MaxBlurRadius)
 }
 
+// EffectNone keeps the lock screen still: no background animation, just the
+// frozen blurred desktop behind the greeter chrome.
+const EffectNone = "none"
+
 func Default() Config {
-	return Config{Effect: "rain", Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS, PowerActions: append([]power.Action{}, power.DefaultOrder...)}
+	return Config{Effect: EffectNone, Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS, PowerActions: append([]power.Action{}, power.DefaultOrder...)}
+}
+
+// validatePresentation accepts EffectNone as a palette-only setting; every
+// other effect must be one the renderer knows.
+func validatePresentation(effect, palette string) error {
+	if effect == EffectNone {
+		if animations.GetThemeMetadata(palette) == nil {
+			return fmt.Errorf("unknown palette %q", palette)
+		}
+		return nil
+	}
+	return renderer.Validate(effect, palette)
 }
 func Path() string {
 	dir, err := os.UserConfigDir()
@@ -144,10 +162,10 @@ func Load(path string) (Config, error) {
 		c.EffectFPS = max(MinFPS, min(MaxFPS, c.EffectFPS))
 	}
 	c.PowerActions = power.Normalize(c.PowerActions)
-	return c, renderer.Validate(c.Effect, c.Palette)
+	return c, validatePresentation(c.Effect, c.Palette)
 }
 func Save(path string, c Config) error {
-	if err := renderer.Validate(c.Effect, c.Palette); err != nil {
+	if err := validatePresentation(c.Effect, c.Palette); err != nil {
 		return err
 	}
 	fields, err := read(path)

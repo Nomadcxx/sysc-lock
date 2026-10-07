@@ -181,6 +181,22 @@ func (c *Client) EnableBackground(effect, palette string, reduced bool, backend 
 	c.effect, c.palette, c.reduced = effect, palette, reduced
 	c.effectBackend, c.effectPowerSave = backend, powerSave
 }
+
+// ApplyPresentation swaps what the next frames draw. Workers own their effect
+// for life, so each running worker is torn down and scheduleBackground builds
+// a fresh one; the old worker's memory returns when its goroutine exits.
+func (c *Client) ApplyPresentation(effect, palette string, reduced bool, backend string, powerSave bool) {
+	c.EnableBackground(effect, palette, reduced, backend, powerSave)
+	for _, out := range c.outputs {
+		if b := out.background; b != nil {
+			b.stop()
+			c.releaseStoppedBackground(b)
+			out.background = nil
+			out.pending = true
+		}
+	}
+	c.repaintOwner()
+}
 func (c *Client) motionAllowed(now time.Time) bool {
 	return !c.frozen && (c.resumeAt.IsZero() || !now.Before(c.resumeAt))
 }

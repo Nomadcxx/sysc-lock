@@ -115,6 +115,16 @@ func TestPresentationDefaults(t *testing.T) {
 	}
 }
 
+func TestEffectNoneAcceptedWithValidPalette(t *testing.T) {
+	got, err := Load(writeConfig(t, `{"effect":"none","palette":"eldritch"}`))
+	if err != nil || got.Effect != EffectNone || got.Palette != "eldritch" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err := Load(writeConfig(t, `{"effect":"none","palette":"bogus"}`)); err == nil {
+		t.Fatal("none must still validate its palette")
+	}
+}
+
 func TestClockStyleNormalizes(t *testing.T) {
 	for body, want := range map[string]string{
 		`{"clock_style":"phm_blocky_reverse"}`: "phm_blocky_reverse",

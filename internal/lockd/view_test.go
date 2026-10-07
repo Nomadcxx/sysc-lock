@@ -1,6 +1,7 @@
 package lockd
 
 import (
+	"bytes"
 	"image"
 	"image/color"
 	"math"
@@ -13,7 +14,108 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
+	xdraw "golang.org/x/image/draw"
 )
+
+func TestCaretUsesFrameTimeAndHonorsReducedMotion(t *testing.T) {
+	v := NewView(theme.Default(), "user", "host")
+	fb := render.New(800, 600)
+	s := Layout(fb.Width, fb.Height, v.Scale, v.StyleName, v.clockText(time.UnixMilli(10_200)))
+	inner := s.Entry.Inset(max(2, int(8*s.Scale)))
+	sq := max(2, s.Entry.Dy()/4)
+	x, y := inner.Min.X+sq/2, s.Entry.Min.Y+s.Entry.Dy()/2
+	for _, reduced := range []bool{false, true} {
+		v.Reduced = reduced
+		for _, millis := range []int64{200, 700} {
+			now := time.UnixMilli(10_000 + millis)
+			v.Reveal.Show(now)
+			v.Render(fb, now)
+			want := v.ground()
+			if reduced || millis < 500 {
+				want = v.accent()
+			}
+			if got := fb.At(x, y); got != want {
+				t.Fatalf("reduced=%v frame=%dms: caret=%v, want %v", reduced, millis, got, want)
+			}
+		}
+	}
+}
+
+func TestLogoRenderingReusesScalingAndPreservesPixels(t *testing.T) {
+	v := NewView(theme.Default(), "user", "host")
+	fb, want := render.New(80, 40), render.New(80, 40)
+	r := image.Rect(-10, 3, 90, 35)
+	tint := color.NRGBA{R: 31, G: 120, B: 210, A: 255}
+	ground := color.NRGBA{R: 190, G: 81, B: 17, A: 255}
+	check := func() {
+		t.Helper()
+		fb.Fill(ground)
+		want.Fill(ground)
+		scaled := image.NewNRGBA(image.Rect(0, 0, r.Dx(), r.Dy()))
+		xdraw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), art.Logo(), art.Logo().Bounds(), xdraw.Over, nil)
+		for y := 0; y < r.Dy(); y++ {
+			for x := 0; x < r.Dx(); x++ {
+				a := uint32(scaled.Pix[scaled.PixOffset(x, y)+3])
+				if a == 0 {
+					continue
+				}
+				dst := color.NRGBAModel.Convert(want.At(r.Min.X+x, r.Min.Y+y)).(color.NRGBA)
+				want.Set(r.Min.X+x, r.Min.Y+y, color.NRGBA{
+					R: uint8((uint32(dst.R)*(255-a) + uint32(tint.R)*a) / 255),
+					G: uint8((uint32(dst.G)*(255-a) + uint32(tint.G)*a) / 255),
+					B: uint8((uint32(dst.B)*(255-a) + uint32(tint.B)*a) / 255), A: 255})
+			}
+		}
+		v.drawLogo(fb, r, tint)
+		if !bytes.Equal(fb.Pix, want.Pix) {
+			t.Fatal("logo pixels changed")
+		}
+	}
+	check()
+	r = image.Rect(4, -2, 76, 42)
+	tint.R = 220 // changing geometry and theme must remain correct.
+	check()
+	if allocations := testing.AllocsPerRun(3, func() { v.drawLogo(fb, r, tint) }); allocations > 1 {
+		t.Fatalf("steady logo rendering allocates %.0f objects per frame", allocations)
+	}
+}
+
+func BenchmarkForeground1080p(b *testing.B) {
+	v := NewView(theme.Default(), "user", "host")
+	v.Scale, v.Reduced = 1.25, true
+	v.Hint, v.Ambient = "F1 Options - Enter Unlock", "|||| 63% - Wi-Fi - playing"
+	fb := render.New(1920, 1080)
+	now := time.Unix(10, 0)
+	v.Render(fb, now)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		v.Render(fb, now)
+	}
+}
+
+func TestFillRectClipsWithoutAllocating(t *testing.T) {
+	fb := render.New(8, 6)
+	fb.Fill(color.NRGBA{R: 17})
+	r := image.Rect(-3, 2, 5, 10)
+	ink := color.NRGBA{R: 200, G: 21, B: 82, A: 123}
+	allocations := testing.AllocsPerRun(3, func() { fillRect(fb, r, ink) })
+	if allocations != 0 {
+		t.Fatalf("panel fill allocated %.0f objects", allocations)
+	}
+	for y := range fb.Height {
+		for x := range fb.Width {
+			want := color.NRGBA{R: 17, A: 255}
+			if image.Pt(x, y).In(r) {
+				want = ink
+				want.A = 255
+			}
+			if got := fb.At(x, y); got != want {
+				t.Fatalf("pixel %d,%d = %v, want %v", x, y, got, want)
+			}
+		}
+	}
+}
 
 func TestErrorAutoClear4s(t *testing.T) {
 	v := NewView(theme.Default(), "nomadx", "host")
@@ -110,18 +212,15 @@ func TestSceneFitsEverySize(t *testing.T) {
 			for name, r := range map[string]image.Rectangle{
 				"clock": s.ClockBox, "date": s.Date, "entry": s.Entry,
 				"backing": s.Backing, "status": s.Status, "ambient": s.Ambient,
-				"menu": s.Menu, "help": s.Help,
+				"menu": s.Menu, "help": s.Help, "logo": s.Logo,
+				"frame": s.Frame, "rule": s.Rule, "label": s.Label,
 			} {
 				if r.Empty() {
-					continue // a dropped row, like the wordmark
+					continue // a dropped row, like the logo or title on tiny outputs
 				}
 				if !r.In(fb) {
 					t.Fatalf("%dx%d %s: %s %v outside output", c.w, c.h, style, name, r)
 				}
-			}
-			wm := image.Rectangle{Min: s.WordAt, Max: s.WordAt.Add(image.Pt(art.Width(s.Wordmark)*s.WordCW, len(s.Wordmark)*2*s.WordCW))}
-			if s.WordCW > 0 && !wm.In(fb) {
-				t.Fatalf("%dx%d %s: wordmark outside output", c.w, c.h, style)
 			}
 			if !(s.ClockBox.Max.Y <= s.Date.Min.Y && s.Date.Max.Y <= s.Entry.Min.Y) {
 				t.Fatalf("%dx%d %s: stack overlaps %+v", c.w, c.h, style, s)
@@ -198,11 +297,11 @@ func TestPrintRevealIsBoundedAndSkippedWhenReduced(t *testing.T) {
 	fb := render.New(960, 720)
 	v.RenderForeground(fb, now)
 	s := Layout(960, 720, 1, "", v.clockText(now))
-	early, _, done := v.printLimits(now.Add(100*time.Millisecond), s)
-	if done || early >= art.Total(s.Wordmark) {
+	early, done := v.printLimits(now.Add(100*time.Millisecond), s)
+	if done || early >= art.Total(s.Clock) {
 		t.Fatal("print reveal should still be running", early)
 	}
-	if _, _, done = v.printLimits(now.Add(art.PrintDuration), s); !done {
+	if _, done = v.printLimits(now.Add(art.PrintDuration), s); !done {
 		t.Fatal("print reveal must end within one second")
 	}
 	if got := v.NextDeadline(now); got.After(now.Add(40 * time.Millisecond)) {
@@ -211,8 +310,8 @@ func TestPrintRevealIsBoundedAndSkippedWhenReduced(t *testing.T) {
 	r := NewView(theme.Default(), "u", "h")
 	r.Reduced = true
 	r.RenderForeground(render.New(960, 720), now)
-	if w, c, done := r.printLimits(now, s); !done || w != -1 || c != -1 {
-		t.Fatal("reduced motion draws the final frame", w, c, done)
+	if c, done := r.printLimits(now, s); !done || c != -1 {
+		t.Fatal("reduced motion draws the final frame", c, done)
 	}
 }
 
@@ -249,8 +348,8 @@ func TestStatusShowsWhileEntryHidden(t *testing.T) {
 		t.Fatal("entry must stay hidden until a key reveals it")
 	}
 	got := color.NRGBAModel.Convert(fb.At(s.Backing.Min.X+1, s.Backing.Min.Y+1)).(color.NRGBA)
-	if got != panelGround {
-		t.Fatal("status needs its solid backing even with the entry hidden", got)
+	if got == v.Pal.Surface || got == panelInk {
+		t.Fatal("status needs its frosted backing even with the entry hidden", got)
 	}
 }
 
@@ -269,14 +368,22 @@ func TestHiddenEntryDrawsNoFieldAndRevealedDoes(t *testing.T) {
 	if reflect.DeepEqual(a.Pix, b.Pix) {
 		t.Fatal("revealing the entry must change the frame")
 	}
-	px := func(fb *render.Framebuffer, p image.Point) color.NRGBA {
-		return color.NRGBAModel.Convert(fb.At(p.X, p.Y)).(color.NRGBA)
+	ink := func(fb *render.Framebuffer) int {
+		n := 0
+		for y := s.Entry.Min.Y; y < s.Entry.Max.Y; y++ {
+			for x := s.Entry.Min.X; x < s.Entry.Max.X; x++ {
+				if color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA) == panelInk {
+					n++
+				}
+			}
+		}
+		return n
 	}
-	if px(a, s.Entry.Min) != hidden.Pal.Surface {
-		t.Fatal("hidden entry must leave the background alone")
+	if ink(a) != 0 {
+		t.Fatal("hidden entry must draw no ink inside the field")
 	}
-	if px(b, s.Entry.Min) != panelAccent {
-		t.Fatal("revealed entry draws an accent frame")
+	if ink(b) == 0 {
+		t.Fatal("the revealed entry must draw its placeholder ink")
 	}
 }
 
@@ -310,7 +417,7 @@ func TestSceneStaysInsideItsBounds(t *testing.T) {
 	}
 }
 
-func TestHiddenEntryPaintsNoAmbientInk(t *testing.T) {
+func TestAmbientShowsWhileEntryHidden(t *testing.T) {
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	v := NewView(theme.Default(), "u", "h")
 	v.Reduced = true
@@ -322,8 +429,8 @@ func TestHiddenEntryPaintsNoAmbientInk(t *testing.T) {
 		t.Skip("no ambient slot")
 	}
 	got := color.NRGBAModel.Convert(fb.At(s.Ambient.Min.X+1, s.Ambient.Min.Y+1)).(color.NRGBA)
-	if got != v.Pal.Surface {
-		t.Fatal("hidden entry must leave ambient undrawn")
+	if got != panelGround {
+		t.Fatal("the status row stays on screen even while the entry is hidden")
 	}
 }
 

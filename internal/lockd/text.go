@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"os"
 	"time"
 
 	"golang.org/x/image/font"
@@ -25,12 +26,33 @@ var (
 	faceCach = map[int]font.Face{}
 )
 
+// fontPaths is where Fira Code lands on common layouts; greet renders in the
+// terminal, and the shipping kitty config is Fira Code, so the lock screen
+// matches the greeter. Missing system font falls back to the embedded Go Mono.
+// ponytail: fixed path list; consult kitty.conf/fontconfig when a user's
+// custom terminal font needs to match too.
+var fontPaths = []string{
+	"/usr/share/fonts/TTF/FiraCode-Regular.ttf",
+	"/usr/share/fonts/truetype/firacode/FiraCode-Regular.ttf",
+	"/usr/share/fonts/opentype/firacode/FiraCode-Regular.ttf",
+	"/usr/local/share/fonts/FiraCode-Regular.ttf",
+}
+
+func fontBytes() []byte {
+	for _, p := range fontPaths {
+		if b, err := os.ReadFile(p); err == nil {
+			return b
+		}
+	}
+	return gomono.TTF
+}
+
 func face(px int) font.Face {
 	if f, ok := faceCach[px]; ok {
 		return f
 	}
 	if parsed == nil {
-		f, err := opentype.Parse(gomono.TTF)
+		f, err := opentype.Parse(fontBytes())
 		if err != nil {
 			panic("gofont: " + err.Error())
 		}
@@ -116,6 +138,21 @@ func (dst clippedText) Set(x, y int, col color.Color) {
 
 // drawTextBox clips glyph ink as well as advance widths, including overhangs.
 func drawTextBox(fb *render.Framebuffer, box image.Rectangle, baseline int, text string, px int, col color.NRGBA) {
+	drawTextBoxAlign(fb, box, baseline, text, px, col, false)
+}
+
+// drawTextBoxLeft draws like drawTextBox but anchors the text to the box's
+// left edge, which is how greet labels its input rows.
+func drawTextBoxLeft(fb *render.Framebuffer, box image.Rectangle, baseline int, text string, px int, col color.NRGBA) {
+	drawTextBoxAlign(fb, box, baseline, text, px, col, true)
+}
+
+// textWidth is the pixel width of s at font size px.
+func textWidth(px int, s string) int {
+	return font.MeasureString(face(px), s).Ceil()
+}
+
+func drawTextBoxAlign(fb *render.Framebuffer, box image.Rectangle, baseline int, text string, px int, col color.NRGBA, left bool) {
 	box = box.Intersect(fb.Bounds())
 	if box.Empty() || text == "" {
 		return
@@ -139,6 +176,10 @@ func drawTextBox(fb *render.Framebuffer, box image.Rectangle, baseline int, text
 	}
 	text = string(runes)
 	width = font.MeasureString(f, text)
-	d := font.Drawer{Dst: clippedText{fb, box}, Src: image.NewUniform(col), Face: f, Dot: fixed.P(box.Min.X+(box.Dx()-width.Ceil())/2, baseline)}
+	x := box.Min.X + (box.Dx()-width.Ceil())/2
+	if left {
+		x = box.Min.X
+	}
+	d := font.Drawer{Dst: clippedText{fb, box}, Src: image.NewUniform(col), Face: f, Dot: fixed.P(x, baseline)}
 	d.DrawString(text)
 }

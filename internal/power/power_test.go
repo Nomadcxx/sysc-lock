@@ -284,7 +284,7 @@ func TestStatusUsesGreetWording(t *testing.T) {
 	if Help != "↑↓ Navigate • Enter Select • Esc Cancel" {
 		t.Fatal(Help)
 	}
-	if ScreenHelp != "F4 Power • Enter Unlock" || ScreenHelpPlain != "Enter Unlock" {
+	if ScreenHelp != "F1 Options • F4 Power • Enter Unlock" || ScreenHelpPlain != "F1 Options • Enter Unlock" {
 		t.Fatal(ScreenHelp, ScreenHelpPlain)
 	}
 }

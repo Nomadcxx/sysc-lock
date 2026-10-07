@@ -95,20 +95,6 @@ func TestUnsupportedRuneDrawsNothing(t *testing.T) {
 	}
 }
 
-func TestWordmarkUsesSupportedGlyphs(t *testing.T) {
-	rows := Wordmark()
-	if len(rows) < 3 {
-		t.Fatal(rows)
-	}
-	for _, row := range rows {
-		for _, c := range row {
-			if !Supported(c) {
-				t.Fatalf("wordmark uses %U", c)
-			}
-		}
-	}
-}
-
 func TestPickHonorsConfiguredPlain(t *testing.T) {
 	style, rows, cw := Pick(Plain, "12:59:59 PM", 1920, 1080)
 	if !style.Plain() || style.Name != Plain || rows != nil || cw != 0 {

@@ -85,8 +85,13 @@ is supported. Conflicting or stale registration fails explicitly.
 Presentation loads `$XDG_CONFIG_HOME/sysc-lock/config.json` at each acquisition:
 
 ```json
-{"effect":"rain","palette":"nord","reduced_motion":false,"clock_style":"kompaktblk","clock_24h":false,"effect_fps":20,"effect_backend":"auto","effect_gpu_power_save":true,"blur_backdrop":true,"blur_radius":24,"power_actions":["logout","reboot","shutdown"]}
+{"effect":"none","palette":"nord","reduced_motion":false,"clock_style":"kompaktblk","clock_24h":false,"effect_fps":20,"effect_backend":"auto","effect_gpu_power_save":true,"blur_backdrop":true,"blur_radius":24,"power_actions":["logout","reboot","shutdown"]}
 ```
+
+`effect` is optional: `none` (default) keeps the frozen blurred desktop and
+skips the animation worker entirely; any of the scene effects (for example
+`rain`, `fire`, `matrix`) animates behind the chrome instead. `palette` picks
+the theme that drives both the chrome and the effect colors.
 
 `clock_style` is `kompaktblk`, `phm_blocky_reverse`, `phmvga`, `phm_slanted`
 or `plain`; an unknown
