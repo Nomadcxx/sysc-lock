@@ -55,6 +55,8 @@ type task struct {
 // runner owns all shared install state; the model only ever reads copies
 // through snapshot, which is what keeps the UI goroutine race-free.
 type runner struct {
+	ctx       context.Context
+	cancelFn  context.CancelFunc
 	mu        sync.Mutex
 	opts      options
 	log       *logger
@@ -82,13 +84,28 @@ func newRunner(opts options, log *logger) *runner {
 	if opts.uninstall {
 		tasks = uninstallTasks()
 	}
-	r := &runner{opts: opts, log: log, tasks: tasks, failedIdx: -1, skips: map[int]string{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &runner{ctx: ctx, cancelFn: cancel, opts: opts, log: log, tasks: tasks, failedIdx: -1, skips: map[int]string{}}
 	r.status = make([]taskStatus, len(tasks))
 	r.subStat = make([][]taskStatus, len(tasks))
 	for i, t := range tasks {
 		r.subStat[i] = make([]taskStatus, len(t.sub))
 	}
 	return r
+}
+
+func (r *runner) cancel() {
+	if r.cancelFn != nil {
+		r.cancelFn()
+	}
+}
+
+func (r *runner) cancelled() bool { return r.ctx.Err() != nil }
+
+func (r *runner) taskIs(i int, name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return i >= 0 && i < len(r.tasks) && r.tasks[i].name == name
 }
 
 func (r *runner) snapshot() runnerState {
