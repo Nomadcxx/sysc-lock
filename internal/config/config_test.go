@@ -279,3 +279,33 @@ func TestBlurBackdropDefaultsAndClamp(t *testing.T) {
 		t.Fatalf("save dropped blur keys: %s %v", raw, err)
 	}
 }
+
+func TestEffectBackendKeys(t *testing.T) {
+	if got := Default().BackendChoice(); got != "auto" {
+		t.Fatalf("default backend %q", got)
+	}
+	if !Default().GpuPowerSave() {
+		t.Fatal("power save should default on")
+	}
+	for body, want := range map[string]string{
+		`{"effect_backend":"gpu"}`:      "gpu",
+		`{"effect_backend":"cpu"}`:      "cpu",
+		`{"effect_backend":"nonsense"}`: "auto",
+		`{}`:                            "auto",
+	} {
+		c, err := Load(writeConfig(t, body))
+		if err != nil || c.BackendChoice() != want {
+			t.Fatalf("%s: %q %v", body, c.BackendChoice(), err)
+		}
+	}
+	for body, want := range map[string]bool{
+		`{"effect_gpu_power_save":false}`: false,
+		`{"effect_gpu_power_save":true}`:  true,
+		`{}`:                              true,
+	} {
+		c, err := Load(writeConfig(t, body))
+		if err != nil || c.GpuPowerSave() != want {
+			t.Fatalf("%s: %v %v", body, c.GpuPowerSave(), err)
+		}
+	}
+}

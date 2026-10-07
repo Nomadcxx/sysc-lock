@@ -217,7 +217,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	}
 	view.StyleName, view.Clock24, view.Reduced = cfg.ClockStyle, cfg.Clock24h, cfg.ReducedMotion
 	client.SetEffectRate(cfg.EffectFPS)
-	client.EnableBackground(cfg.Effect, cfg.Palette, cfg.ReducedMotion)
+	client.EnableBackground(cfg.Effect, cfg.Palette, cfg.ReducedMotion, cfg.BackendChoice(), cfg.GpuPowerSave())
 	client.EnableWallpaper(os.Getenv("SYSC_LOCK_WALLPAPER"))
 	client.EnableBlur(cfg.BlurBackdrop(), cfg.BlurRadiusPx())
 	client.CaptureBlur()

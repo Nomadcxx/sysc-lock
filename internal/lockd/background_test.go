@@ -178,8 +178,8 @@ func takeWallpaperFrame(t *testing.T, b *backgroundWorker, w, h int, previous ba
 }
 func TestWallpaperSharedDecodeSurvivesFileRemovalAndAlternatingOutputs(t *testing.T) {
 	asset := wallpaperTestAsset(t)
-	first := newBackgroundWorker("", "", asset, func() {})
-	second := newBackgroundWorker("", "", asset, func() {})
+	first := newBackgroundWorker("", "", asset, func() {}, effectPolicy{}, newCpuBackend)
+	second := newBackgroundWorker("", "", asset, func() {}, effectPolicy{}, newCpuBackend)
 	defer first.stop()
 	defer second.stop()
 	a := takeWallpaperFrame(t, first, 4, 4, backgroundFrame{})
@@ -197,7 +197,7 @@ func TestWallpaperSharedDecodeSurvivesFileRemovalAndAlternatingOutputs(t *testin
 }
 func TestStaticWallpaperReusesSlotAndDoesNotSchedulePerKey(t *testing.T) {
 	asset := wallpaperTestAsset(t)
-	worker := newBackgroundWorker("", "", asset, func() {})
+	worker := newBackgroundWorker("", "", asset, func() {}, effectPolicy{}, newCpuBackend)
 	defer worker.stop()
 	first := takeWallpaperFrame(t, worker, 4, 4, backgroundFrame{})
 	again := takeWallpaperFrame(t, worker, 4, 4, first)
