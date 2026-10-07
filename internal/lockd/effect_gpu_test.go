@@ -162,6 +162,26 @@ func TestGpuDrawHonorsStride(t *testing.T) {
 	}
 }
 
+func TestGpuTightReadbackUsesRowStorage(t *testing.T) {
+	b := newTestGpuBackend(t, "fire", 8, 8)
+	pixels := make([]byte, 8*8*4)
+	if err := b.paintSolid([4]float32{1, 0, 0, 1}, pixels, 8*4); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.scratch) > 8*4 {
+		t.Fatalf("tight readback retains %d bytes, want one row", len(b.scratch))
+	}
+}
+
+func TestFlipRGBAToBGRAOddHeight(t *testing.T) {
+	pixels := []byte{1, 2, 3, 0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23}
+	flipRGBAToBGRA(pixels, make([]byte, 8))
+	want := []byte{18, 17, 16, 255, 22, 21, 20, 255, 10, 9, 8, 255, 14, 13, 12, 255, 3, 2, 1, 255, 6, 5, 4, 255}
+	if !bytes.Equal(pixels, want) {
+		t.Fatalf("converted rows = %v, want %v", pixels, want)
+	}
+}
+
 // The plan's step-1 sketch says "len(got) == 6" but then states the real rule:
 // always exactly 8 vec3 stops, fewer inputs repeat the last, more truncate to 8.
 // The stated rule wins; 8 stops is what the `uniform vec3 uPalette[8]` contract needs.

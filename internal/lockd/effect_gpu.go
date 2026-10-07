@@ -454,6 +454,16 @@ func (b *gpuBackend) Draw(pixels []byte, stride int) error {
 // flipped here rather than in each effect's maths.
 func (b *gpuBackend) readback(pixels []byte, stride int) error {
 	rowBytes := b.w * 4
+	if stride == rowBytes && len(pixels) >= rowBytes*b.h {
+		if len(b.scratch) != rowBytes {
+			b.scratch = make([]byte, rowBytes)
+		}
+		C.glReadPixels(0, 0, C.GLsizei(b.w), C.GLsizei(b.h),
+			C.GL_RGBA, C.GL_UNSIGNED_BYTE, unsafe.Pointer(&pixels[0]))
+		flipRGBAToBGRA(pixels[:rowBytes*b.h], b.scratch)
+		return glErr("readback")
+	}
+	// Padded or partial caller buffers retain the full-frame fallback.
 	if want := rowBytes * b.h; len(b.scratch) < want {
 		b.scratch = make([]byte, want)
 	}
@@ -478,6 +488,19 @@ func (b *gpuBackend) readback(pixels []byte, stride int) error {
 		}
 	}
 	return glErr("readback")
+}
+
+// flipRGBAToBGRA converts tightly packed GL rows in place with one spare row.
+func flipRGBAToBGRA(pixels, row []byte) {
+	stride := len(row)
+	for top, bottom := 0, len(pixels)-stride; top < bottom; top, bottom = top+stride, bottom-stride {
+		copy(row, pixels[top:top+stride])
+		copy(pixels[top:top+stride], pixels[bottom:bottom+stride])
+		copy(pixels[bottom:bottom+stride], row)
+	}
+	for i := 0; i < len(pixels); i += 4 {
+		pixels[i], pixels[i+2], pixels[i+3] = pixels[i+2], pixels[i], 0xff
+	}
 }
 
 func (b *gpuBackend) Close() error {
