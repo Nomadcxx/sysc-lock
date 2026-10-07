@@ -36,7 +36,35 @@ PAM authentication. It supports Niri and sysc-shell.
 
     go build ./cmd/sysc-lock
 
-Requires libpam headers (`pam_apl.h`) because of the cgo PAM binding.
+Requires libpam headers (`security/pam_appl.h`) because of the cgo PAM binding.
+
+## Install
+
+The guided installer builds sysc-lock, installs the binary and the user unit, and
+can undo both:
+
+    go run ./cmd/installer
+
+Offline, without cgo (the installer itself needs no cgo):
+
+    CGO_ENABLED=0 go build -o sysc-lock-installer ./cmd/installer && ./sysc-lock-installer
+
+One-liner:
+
+    curl -fsSL https://raw.githubusercontent.com/Nomadcxx/sysc-lock/master/install.sh | sh -s -- --yes
+
+Flags: `--prefix PATH` (default `$HOME/.local`; required when running as root),
+`--candidate PATH` (install a prebuilt binary instead of building),
+`--uninstall` (remove the binary and unit), `--yes` (no prompts), `--log PATH`.
+Exit codes: `0` complete, `1` a task failed, `2` usage or preflight refusal,
+`130` cancelled.
+
+Building sysc-lock needs the libpam headers, because that step runs with cgo
+enabled; everything else, including `--uninstall`, does not.
+
+The installer writes only under the prefix. It never enables or starts a
+service, never edits PAM, and never uses sudo. `scripts/install` stays available
+and the guided installer runs exactly its steps.
 
 ## Usage
 
@@ -98,6 +126,7 @@ uncertainty returns failure. The service restarts on failure with a three-start
 limit per minute; an exhausted recovery still leaves the compositor locked.
 
 `scripts/install CANDIDATE ABSOLUTE_PREFIX` installs the executable and user unit.
+The guided installer above runs these same steps.
 It does not enable/start services or modify PAM. Review the candidate and recovery
 route before activating the unit in a coordinated Niri session. The unit disables
 core dumps. It permits the established PAM stack's native helper behavior.
