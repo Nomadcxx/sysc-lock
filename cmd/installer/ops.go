@@ -55,21 +55,29 @@ func installDirs(prefix string) error {
 	return nil
 }
 
-// installBinary mirrors `install -m 0755 candidate $prefix/bin/sysc-lock.new`
-// followed by `mv -f`; the rename is atomic like mv.
-func installBinary(prefix, candidate string) error {
+// stageBinary mirrors `install -m 0755 candidate $prefix/bin/sysc-lock.new`;
+// a stale .new is overwritten, and the live binary is never written in place.
+func stageBinary(prefix, candidate string) error {
 	data, err := os.ReadFile(candidate)
 	if err != nil {
 		return err
 	}
-	dst := prefix + "/bin/sysc-lock"
-	if err := os.WriteFile(dst+".new", data, 0755); err != nil {
+	if err := os.WriteFile(prefix+"/bin/sysc-lock.new", data, 0755); err != nil {
 		return err
 	}
-	if err := os.Chmod(dst+".new", 0755); err != nil {
+	return os.Chmod(prefix+"/bin/sysc-lock.new", 0755)
+}
+
+// replaceBinary mirrors `mv -f`: an atomic rename on the same filesystem.
+func replaceBinary(prefix string) error {
+	return os.Rename(prefix+"/bin/sysc-lock.new", prefix+"/bin/sysc-lock")
+}
+
+func installBinary(prefix, candidate string) error {
+	if err := stageBinary(prefix, candidate); err != nil {
 		return err
 	}
-	return os.Rename(dst+".new", dst)
+	return replaceBinary(prefix)
 }
 
 // ponytail: same semantics as the script's sed `s|ExecStart=.*|...|` — replaces
