@@ -1,8 +1,10 @@
 package ambient
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -40,7 +42,7 @@ func TestLoadRejectsStaleMissingAndJunk(t *testing.T) {
 		t.Fatal("junk must fail")
 	}
 	pct := 1
-	if err := Write(path, Snapshot{AsOf: now.Add(-6 * time.Second), BatteryPct: &pct}); err != nil {
+	if err := Write(path, Snapshot{AsOf: now.Add(-6 * time.Second), BatteryPct: &pct, Media: Playing, Title: "Old track", Artist: "Old artist"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(path, now); err == nil {
@@ -82,5 +84,45 @@ func TestLoadFIFODoesNotBlock(t *testing.T) {
 			<-done
 		}
 		t.Fatal("FIFO snapshot blocked the owner")
+	}
+}
+
+func TestWriteAndLoadBoundMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ambient.json")
+	now := time.Now()
+	raw := map[string]any{"as_of": now, "media": "playing", "title": "  A\n B\u202e\u200d\x00  ", "artist": strings.Repeat("é", 140)}
+	buf, _ := json.Marshal(raw)
+	if err := os.WriteFile(path, buf, 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inspect both boundaries; user-owned snapshots bypass collection.
+	out, _ := json.Marshal(loaded)
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["title"] != "A B" || got["artist"] != strings.Repeat("é", 128) {
+		t.Fatalf("unsafe or unbounded loaded metadata")
+	}
+	var input Snapshot
+	if err := json.Unmarshal(buf, &input); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(path, input); err != nil {
+		t.Fatal(err)
+	}
+	out, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["title"] != "A B" || got["artist"] != strings.Repeat("é", 128) {
+		t.Fatal("writer did not bound metadata")
 	}
 }

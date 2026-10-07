@@ -9,6 +9,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -26,6 +27,8 @@ type Snapshot struct {
 	Charging   *bool     `json:"charging,omitempty"`
 	Link       string    `json:"link,omitempty"`
 	Media      string    `json:"media,omitempty"`
+	Title      string    `json:"title,omitempty"`
+	Artist     string    `json:"artist,omitempty"`
 	Temp       *float64  `json:"temp,omitempty"`
 	Unit       string    `json:"unit,omitempty"`
 }
@@ -38,6 +41,9 @@ func BatteryBar(pct int) string {
 }
 
 func (s Snapshot) Line(maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
 	var parts []string
 	if s.BatteryPct != nil {
 		parts = append(parts, BatteryBar(*s.BatteryPct))
@@ -48,18 +54,73 @@ func (s Snapshot) Line(maxRunes int) string {
 	case LinkWired:
 		parts = append(parts, "Wired")
 	}
-	if s.Media == Playing {
-		parts = append(parts, Playing)
-	}
-	if s.Temp != nil {
-		parts = append(parts, fmt.Sprintf("%.0f°", math.Round(*s.Temp)))
-	}
-	for len(parts) > 0 {
-		line := strings.Join(parts, Sep)
-		if maxRunes <= 0 || len([]rune(line)) <= maxRunes {
-			return line
-		}
+	for len(parts) > 0 && len([]rune(strings.Join(parts, Sep))) > maxRunes {
 		parts = parts[:len(parts)-1]
 	}
+	remaining := maxRunes - len([]rune(strings.Join(parts, Sep)))
+	if len(parts) > 0 {
+		remaining -= len([]rune(Sep))
+	}
+	if s.Media == Playing {
+		if media := s.mediaLine(remaining); media != "" {
+			parts = append(parts, media)
+		}
+	}
+	if s.Temp != nil {
+		candidate := append(parts, fmt.Sprintf("%.0f°", math.Round(*s.Temp)))
+		if len([]rune(strings.Join(candidate, Sep))) <= maxRunes {
+			parts = candidate
+		}
+	}
+	return strings.Join(parts, Sep)
+}
+
+func (s Snapshot) mediaLine(width int) string {
+	title, artist := cleanMetadata(s.Title), cleanMetadata(s.Artist)
+	if title == "" {
+		if width >= len(Playing) {
+			return Playing
+		}
+		return ""
+	}
+	if artist != "" && len([]rune(title))+3+len([]rune(artist)) <= width {
+		return title + " - " + artist
+	}
+	runes := []rune(title)
+	if len(runes) <= width {
+		return title
+	}
+	if width > 3 {
+		return string(runes[:width-3]) + "..."
+	}
 	return ""
+}
+
+// cleanMetadata bounds untrusted player text at collection and file boundaries.
+func cleanMetadata(text string) string {
+	var out strings.Builder
+	count, space := 0, false
+	for _, r := range text {
+		if unicode.IsSpace(r) {
+			space = count > 0
+			continue
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		if space {
+			out.WriteByte(' ')
+			count++
+			space = false
+		}
+		if count == 128 {
+			break
+		}
+		out.WriteRune(r)
+		count++
+		if count == 128 {
+			break
+		}
+	}
+	return strings.TrimSpace(out.String())
 }

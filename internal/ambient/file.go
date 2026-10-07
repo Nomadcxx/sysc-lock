@@ -33,6 +33,7 @@ func Write(path string, s Snapshot) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
+	s.Title, s.Artist = cleanMetadata(s.Title), cleanMetadata(s.Artist)
 	buf, err := json.Marshal(s)
 	if err != nil {
 		return err
@@ -84,5 +85,6 @@ func Load(path string, now time.Time) (Snapshot, error) {
 	if now.Sub(s.AsOf) > Stale {
 		return Snapshot{}, fmt.Errorf("snapshot is older than %s", Stale)
 	}
+	s.Title, s.Artist = cleanMetadata(s.Title), cleanMetadata(s.Artist)
 	return s, nil
 }
