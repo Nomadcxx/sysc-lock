@@ -217,6 +217,7 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	shift := func(r image.Rectangle) image.Rectangle { return r.Add(image.Pt(dx, 0)) }
 	v.drawForm(fb, shift(s.Frame), shift(s.Backing), shift(s.Rule), s.Scale)
 	if visible {
+		v.drawLabel(fb, shift(s.Label))
 		v.drawEntry(fb, shift(s.Entry), shift(s.Indicators), s.Scale)
 	}
 	if status != "" {
@@ -238,22 +239,44 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	}
 }
 
+// drawLabel is greet's input-row label: left-aligned field name in the
+// focus colour above the entry field.
+func (v *View) drawLabel(fb *render.Framebuffer, r image.Rectangle) {
+	if r.Empty() {
+		return
+	}
+	text := strings.TrimSpace(v.Prompt)
+	if text == "" {
+		text = "Password:"
+	}
+	drawTextBoxLeft(fb, r, r.Min.Y+r.Dy()*3/4, text, v.textPx(r.Dy()*3/5, r), v.accent())
+}
+
 // drawEntry draws the entry field inside the framed form, which owns the
 // border and the frost; the field itself stays frameless (greet minimal style).
 func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectangle, scale float64) {
 	inner := entry.Inset(max(2, int(8*scale)))
+	sq := max(2, entry.Dy()/4)
+	cy := entry.Min.Y + (entry.Dy()-sq)/2
+	cursorX := inner.Min.X
 	if v.Entry == nil || len(v.Entry.Pass) == 0 {
 		drawTextBox(fb, inner, entry.Min.Y+entry.Dy()*2/3, "PASSWORD", v.textPx(entry.Dy()/2, inner), panelInk)
 	} else if v.PromptEcho {
-		drawTextBox(fb, inner, entry.Min.Y+entry.Dy()*2/3, string(v.Entry.Pass), v.textPx(entry.Dy()/2, inner), panelInk)
+		text := string(v.Entry.Pass)
+		px := v.textPx(entry.Dy()/2, inner)
+		drawTextBoxLeft(fb, inner, entry.Min.Y+entry.Dy()*2/3, text, px, panelInk)
+		cursorX = inner.Min.X + min(textWidth(px, text), max(0, inner.Dx()-sq))
 	} else {
-		sq := max(2, entry.Dy()/4)
 		step := sq * 3 / 2
 		n := min(len(v.Entry.Pass), max(1, inner.Dx()/step))
-		y := entry.Min.Y + (entry.Dy()-sq)/2
 		for i := 0; i < n; i++ {
-			fillRect(fb, image.Rect(inner.Min.X+i*step, y, inner.Min.X+i*step+sq, y+sq), panelInk)
+			fillRect(fb, image.Rect(inner.Min.X+i*step, cy, inner.Min.X+i*step+sq, cy+sq), panelInk)
 		}
+		cursorX = inner.Min.X + n*step
+	}
+	// The greet input carries a blinking block cursor at the typing point.
+	if (time.Now().UnixMilli()/500)%2 == 0 && cursorX+sq <= inner.Max.X {
+		fillRect(fb, image.Rect(cursorX, cy, cursorX+sq, cy+sq), v.accent())
 	}
 	parts := []string{}
 	if v.Caps {

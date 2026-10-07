@@ -20,11 +20,14 @@ type Scene struct {
 	// after the ambient row and the hint strip.
 	Logo        image.Rectangle
 	Frame, Rule image.Rectangle
-	Clock       []string
-	ClockCW     int // 0: the plain style draws text inside ClockBox
-	ClockBox    image.Rectangle
-	Date        image.Rectangle
-	DateSize    int
+	// Label is the left-aligned field name above the entry row, greet-style;
+	// it drops with the frame.
+	Label    image.Rectangle
+	Clock    []string
+	ClockCW  int // 0: the plain style draws text inside ClockBox
+	ClockBox image.Rectangle
+	Date     image.Rectangle
+	DateSize int
 	// Entry, Indicators and Status are laid out even while the entry is hidden,
 	// so revealing it never moves anything.
 	Entry, Indicators, Status image.Rectangle
@@ -43,7 +46,7 @@ type Scene struct {
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
-	return s.Logo.Union(s.Frame).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient)
+	return s.Logo.Union(s.Frame).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
@@ -91,8 +94,10 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	padY := px(10)
 	innerGap := px(8) // between the rule line and the field
 	ruleH := lineH    // the framed form's title rule row
+	labelH := lineH   // the field-name row inside the frame
+	labelGap := px(4)
 	total := func() int {
-		t := ruleH + innerGap + clockH + gap + dateH + 2*gap + entryH + 2*lineH + 2*padY + ambientH + helpH
+		t := ruleH + innerGap + labelH + labelGap + clockH + gap + dateH + 2*gap + entryH + 2*lineH + 2*padY + ambientH + helpH
 		if logoH > 0 {
 			t += logoH + gap
 		}
@@ -109,7 +114,7 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	}
 	if total() > height-2*margin && ruleH > 0 {
 		// The form drops its frame before it drops the field itself.
-		ruleH, innerGap, padX, padY = 0, 0, 0, 0
+		ruleH, innerGap, labelH, labelGap, padX, padY = 0, 0, 0, 0, 0, 0
 	}
 	y := max(margin, (height-total())*2/5)
 	if logoH > 0 {
@@ -125,14 +130,22 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 		s.Rule = image.Rect(x, y, x+entryW, y+ruleH)
 		y += ruleH + innerGap
 	}
+	if labelH > 0 {
+		s.Label = image.Rect(x, y, x+entryW, y+labelH)
+		y += labelH + labelGap
+	}
 	s.Entry = image.Rect(x, y, x+entryW, y+entryH)
 	y += entryH
 	s.Indicators = image.Rect(x, y, x+entryW, y+lineH)
 	s.Status = image.Rect(x, y+lineH, x+entryW, y+2*lineH)
-	s.Backing = image.Rect(x, s.Entry.Min.Y, x+entryW, s.Status.Max.Y)
-	if ruleH > 0 {
-		s.Backing = image.Rect(x, s.Rule.Min.Y, x+entryW, s.Status.Max.Y)
+	top := s.Entry.Min.Y
+	if labelH > 0 {
+		top = s.Label.Min.Y
 	}
+	if ruleH > 0 {
+		top = s.Rule.Min.Y
+	}
+	s.Backing = image.Rect(x, top, x+entryW, s.Status.Max.Y)
 	if padX > 0 || padY > 0 {
 		s.Frame = image.Rect(x-padX, s.Backing.Min.Y-padY, x+entryW+padX, s.Status.Max.Y+padY)
 	}

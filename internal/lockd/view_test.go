@@ -111,7 +111,7 @@ func TestSceneFitsEverySize(t *testing.T) {
 				"clock": s.ClockBox, "date": s.Date, "entry": s.Entry,
 				"backing": s.Backing, "status": s.Status, "ambient": s.Ambient,
 				"menu": s.Menu, "help": s.Help, "logo": s.Logo,
-				"frame": s.Frame, "rule": s.Rule,
+				"frame": s.Frame, "rule": s.Rule, "label": s.Label,
 			} {
 				if r.Empty() {
 					continue // a dropped row, like the logo or title on tiny outputs
