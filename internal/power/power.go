@@ -31,9 +31,9 @@ const (
 	// Help is greet's popup help line, verbatim.
 	Help = "↑↓ Navigate • Enter Select • Esc Cancel"
 	// ScreenHelp is the bottom strip when an action is available.
-	ScreenHelp = "F4 Power • Enter Unlock"
+	ScreenHelp = "F1 Options • F4 Power • Enter Unlock"
 	// ScreenHelpPlain is the bottom strip when nothing is available.
-	ScreenHelpPlain = "Enter Unlock"
+	ScreenHelpPlain = "F1 Options • Enter Unlock"
 )
 
 // Label is the row text, in greet's words.

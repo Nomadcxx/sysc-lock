@@ -16,6 +16,7 @@ import (
 
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
+	"github.com/Nomadcxx/sysc-lock/internal/options"
 	"github.com/Nomadcxx/sysc-lock/internal/power"
 )
 
@@ -217,6 +218,14 @@ func (g *enterGate) pressMenu(m *input.Model, r *input.Reveal, k power.Key, menu
 	r.Show(now)
 	menu.Press(k, now)
 	return false, nil
+}
+
+func (g *enterGate) pressOptions(r *input.Reveal, k options.Key, o *options.Options, now time.Time) bool {
+	if g.busy {
+		return false
+	}
+	r.Show(now)
+	return o.Press(k)
 }
 
 func (g *enterGate) accept(generation uint64, phase lockd.Phase) bool {

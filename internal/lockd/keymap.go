@@ -22,6 +22,9 @@ const (
 	symEscape    = 0xff1b
 	symUp        = 0xff52
 	symDown      = 0xff54
+	symLeft      = 0xff51
+	symRight     = 0xff53
+	symF1        = 0xffbe
 	symF4        = 0xffc1
 	symInsert    = 0xff63
 )
@@ -254,7 +257,7 @@ func (c *Client) setupKeyboard() {
 		k.composed = c.keymap.lastComposed
 		k.Backspace = sym == symBackspace
 		k.Escape = sym == symEscape
-		k.Enter, k.Up, k.Down, k.F4, k.Insert = specials(sym)
+		k.Enter, k.Up, k.Down, k.Left, k.Right, k.F1, k.F4, k.Insert = specials(sym)
 		if k.Enter {
 			c.enterCode = ev.Key
 		}
@@ -270,7 +273,7 @@ func (c *Client) setupKeyboard() {
 
 // specials reports the key flags a keysym carries. Nothing else in this file
 // knows the numeric keysyms, so the mapping is testable without a seat.
-func specials(sym uint32) (enter, up, down, f4, insert bool) {
+func specials(sym uint32) (enter, up, down, left, right, f1, f4, insert bool) {
 	switch sym {
 	case symReturn, symKP_Enter:
 		enter = true
@@ -278,6 +281,12 @@ func specials(sym uint32) (enter, up, down, f4, insert bool) {
 		up = true
 	case symDown:
 		down = true
+	case symLeft:
+		left = true
+	case symRight:
+		right = true
+	case symF1:
+		f1 = true
 	case symF4:
 		f4 = true
 	case symInsert:

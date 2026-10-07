@@ -32,6 +32,9 @@ type Key struct {
 	composed  bool // a completed compose sequence repeats its committed character
 	Up        bool
 	Down      bool
+	Left      bool
+	Right     bool
+	F1        bool
 	F4        bool
 	Insert    bool
 	// Released marks a key going up. Enter releases drive the hold-to-confirm

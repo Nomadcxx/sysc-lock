@@ -39,7 +39,9 @@ type View struct {
 	// handed in by the owner so this package does not import power. Ambient
 	// is the one-line status text the owner reads from the collector's
 	// snapshot file; it draws only while the entry is visible.
-	Power      *PowerView
+	Power *PowerView
+	// Options is the F1 effects/theme menu; same popup surface as Power.
+	Options    *MenuView
 	Hint       string
 	Prompt     string // sanitized PAM prompt text, replaces the hint while set
 	PromptEcho bool
@@ -231,6 +233,9 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	if v.Power != nil && v.Power.Open {
 		v.drawPopup(fb, s, *v.Power)
 	}
+	if v.Options != nil && v.Options.Open {
+		v.drawPopup(fb, s, *v.Options)
+	}
 }
 
 // drawEntry draws the entry field inside the framed form, which owns the
@@ -285,7 +290,7 @@ func (v *View) drawAmbient(fb *render.Framebuffer, s Scene) {
 	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Ambient, v.textPx(14, box), panelMuted)
 }
 
-func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p PowerView) {
+func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p MenuView) {
 	box := s.Menu
 	if box.Empty() {
 		return
@@ -445,13 +450,16 @@ var (
 	panelMuted  = color.NRGBA{R: 130, G: 138, B: 150, A: 255} // 5.3:1 on the ground
 )
 
-type PowerView struct {
+type MenuView struct {
 	Open     bool
 	Title    string
 	Rows     []PowerRow
 	Help     string
 	Progress int // -1 when no hold is running
 }
+
+// PowerView is the old name for the shared popup surface.
+type PowerView = MenuView
 
 type PowerRow struct {
 	Title    string
