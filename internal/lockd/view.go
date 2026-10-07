@@ -17,7 +17,7 @@ import (
 )
 
 // View composes the lock screen over the background: SYSC header, a greet-style
-// framed form with the LOCKED rule and frosted glass, the block-digit clock,
+// framed form with the LOCKED rule and solid panel ground, the block-digit clock,
 // date, and an entry that appears when a key reveals it. Errors keep the 4s
 // auto-clear; terminal PAM errors persist.
 type View struct {
@@ -308,8 +308,13 @@ func (v *View) drawAmbient(fb *render.Framebuffer, s Scene) {
 	if s.Ambient.Empty() || v.Ambient == "" {
 		return
 	}
+	// The row is a compact ASCII chip: bordered ground box, block battery.
 	fillRect(fb, s.Ambient, v.ground())
-	box := s.Ambient.Inset(max(1, s.Ambient.Dy()/6))
+	border(fb, s.Ambient, v.accent(), max(1, int(v.Scale)))
+	box := s.Ambient.Inset(max(2, s.Ambient.Dy()/6))
+	if box.Empty() {
+		return
+	}
 	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Ambient, v.textPx(14, box), panelMuted)
 }
 
@@ -366,53 +371,17 @@ func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p MenuView) {
 }
 
 // drawForm renders the greet-style framed form: theme-primary border, the
-// LOCKED rule along the top row, and frosted blurred pixels inside.
+// LOCKED rule along the top row, over a solid ground panel.
 func (v *View) drawForm(fb *render.Framebuffer, frame, backing, rule image.Rectangle, scale float64) {
-	v.frost(fb, backing)
+	if !backing.Empty() {
+		fillRect(fb, backing, v.ground())
+	}
 	if frame.Empty() {
 		return
 	}
 	border(fb, frame, v.banner(), max(2, int(2*scale)))
 	if !rule.Empty() {
 		drawTextBox(fb, rule, rule.Min.Y+rule.Dy()*3/4, "────///////LOCKED///////────", v.textPx(rule.Dy()*3/5, rule), v.banner())
-	}
-}
-
-// frost blurs the pixels already in fb inside r and blends them with the
-// ground, so the form reads as frosted glass over the effect or the desktop.
-// The background is dimmed before this runs, so the mixture keeps ink inside
-// the form above the 4.5:1 floor.
-func (v *View) frost(fb *render.Framebuffer, r image.Rectangle) {
-	r = r.Intersect(fb.Bounds())
-	if r.Empty() {
-		return
-	}
-	if r.Dx() < 8 || r.Dy() < 8 {
-		fillRect(fb, r, v.ground())
-		return
-	}
-	sub := &render.Framebuffer{
-		Width: r.Dx(), Height: r.Dy(), Stride: fb.Stride,
-		Pix: fb.Pix[r.Min.Y*fb.Stride+r.Min.X*4:],
-	}
-	blur := render.Blur(sub, 6, 18)
-	if blur == nil {
-		fillRect(fb, r, v.ground())
-		return
-	}
-	g := v.ground()
-	for y := 0; y < r.Dy(); y++ {
-		sy := min(blur.Height-1, y*blur.Height/r.Dy())
-		for x := 0; x < r.Dx(); x++ {
-			sx := min(blur.Width-1, x*blur.Width/r.Dx())
-			i := sy*blur.Stride + sx*4
-			fb.Set(r.Min.X+x, r.Min.Y+y, color.NRGBA{
-				R: uint8((int(blur.Pix[i]) + int(g.R)) / 2),
-				G: uint8((int(blur.Pix[i+1]) + int(g.G)) / 2),
-				B: uint8((int(blur.Pix[i+2]) + int(g.B)) / 2),
-				A: 0xFF,
-			})
-		}
 	}
 }
 

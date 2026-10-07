@@ -315,7 +315,7 @@ func TestLoadAmbientGoodFile(t *testing.T) {
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if got, want := loadAmbient(path, now, 40), "82% • Wi-Fi • playing • 18°"; got != want {
+	if got, want := loadAmbient(path, now, 40), "[████████░░] 82% • Wi-Fi • playing • 18°"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
@@ -374,14 +374,14 @@ func TestAmbientRowReadsOncePerSecond(t *testing.T) {
 	}
 	write(82)
 	row := ambientRow{path: path}
-	if got, want := row.Get(base, 40), "82%"; got != want {
+	if got, want := row.Get(base, 40), "[████████░░] 82%"; got != want {
 		t.Fatalf("first read: got %q, want %q", got, want)
 	}
 	write(50)
-	if got, want := row.Get(base.Add(500*time.Millisecond), 40), "82%"; got != want {
+	if got, want := row.Get(base.Add(500*time.Millisecond), 40), "[████████░░] 82%"; got != want {
 		t.Fatalf("within the same second: got %q, want cached %q", got, want)
 	}
-	if got, want := row.Get(base.Add(1100*time.Millisecond), 40), "50%"; got != want {
+	if got, want := row.Get(base.Add(1100*time.Millisecond), 40), "[█████░░░░░] 50%"; got != want {
 		t.Fatalf("a second later: got %q, want refreshed %q", got, want)
 	}
 }
@@ -464,10 +464,10 @@ func TestAmbientRowRecutsWhenTheBudgetChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := ambientRow{path: path}
-	if got := row.Get(now, 40); got != "82% • Wi-Fi • playing" {
+	if got := row.Get(now, 40); got != "[████████░░] 82% • Wi-Fi • playing" {
 		t.Fatalf("wide: %q", got)
 	}
-	if got := row.Get(now.Add(10*time.Millisecond), 4); got != "82%" {
+	if got := row.Get(now.Add(10*time.Millisecond), 4); got != "" {
 		t.Fatalf("narrow budget must drop from the right in the same second: %q", got)
 	}
 }

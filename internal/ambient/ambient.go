@@ -30,10 +30,17 @@ type Snapshot struct {
 	Unit       string    `json:"unit,omitempty"`
 }
 
+// BatteryBar renders the battery as a block gauge: [████░░░░░░] 82%.
+func BatteryBar(pct int) string {
+	filled := (pct + 5) / 10
+	filled = max(0, min(10, filled))
+	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", 10-filled) + fmt.Sprintf("] %d%%", pct)
+}
+
 func (s Snapshot) Line(maxRunes int) string {
 	var parts []string
 	if s.BatteryPct != nil {
-		parts = append(parts, fmt.Sprintf("%d%%", *s.BatteryPct))
+		parts = append(parts, BatteryBar(*s.BatteryPct))
 	}
 	switch s.Link {
 	case LinkWifi:

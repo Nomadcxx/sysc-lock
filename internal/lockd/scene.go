@@ -82,6 +82,7 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 		logoH, logoW = 0, 0
 	}
 	gap := 2 * unit
+	tight := max(px(4), unit/2) // the header and date hug the clock
 	dateSize := max(px(24), unit*3/2)
 	dateH := dateSize * 3 / 2
 	entryH := max(px(40), unit*3)
@@ -97,9 +98,9 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	labelH := lineH   // the field-name row inside the frame
 	labelGap := px(4)
 	total := func() int {
-		t := ruleH + innerGap + labelH + labelGap + clockH + gap + dateH + 2*gap + entryH + 2*lineH + 2*padY + ambientH + helpH
+		t := ruleH + innerGap + labelH + labelGap + clockH + tight + dateH + 2*gap + entryH + 2*lineH + 2*padY + ambientH + helpH
 		if logoH > 0 {
-			t += logoH + gap
+			t += logoH + tight
 		}
 		return t
 	}
@@ -119,10 +120,10 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	y := max(margin, (height-total())*2/5)
 	if logoH > 0 {
 		s.Logo = image.Rect((width-logoW)/2, y, (width+logoW)/2, y+logoH)
-		y += logoH + gap
+		y += logoH + tight
 	}
 	s.ClockBox = image.Rect((width-clockW)/2, y, (width+clockW)/2, y+clockH)
-	y += clockH + gap
+	y += clockH + tight
 	s.Date = image.Rect(0, y, width, y+dateH)
 	s.DateSize = dateSize
 	y += dateH + 2*gap
