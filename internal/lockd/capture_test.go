@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,6 +13,29 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-wayland/client"
 )
+
+// This check captures into memory before any lock request, never into a file.
+func TestLivePrelockBlurCapture(t *testing.T) {
+	if os.Getenv("SYSC_LOCK_LIVE_CAPTURE_TEST") != "1" {
+		t.Skip("explicit live capture check only")
+	}
+	c, err := Connect(New(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.EnableBlur(true, 24)
+	c.CaptureBlur()
+	if len(c.outputs) == 0 {
+		t.Fatal("no outputs")
+	}
+	for id, out := range c.outputs {
+		if out.backdrop == nil {
+			t.Fatalf("output %d has no pre-lock backdrop", id)
+		}
+		t.Logf("output %d captured %dx%d, reduced to %dx%d", id, out.blurW, out.blurH, out.backdrop.Width, out.backdrop.Height)
+	}
+}
 
 func TestCaptureBeforeLockSurfaceConfigure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wayland-test")
