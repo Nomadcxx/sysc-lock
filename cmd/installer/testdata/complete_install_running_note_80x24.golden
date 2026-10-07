@@ -1,0 +1,18 @@
+                              sysc-lock installer                               
+╭────────────────────────────────────────────────────────────────────────────╮
+│  Installation complete.                                                    │
+│  Binary: /home/test/.local/bin/sysc-lock                                   │
+│  Unit:   /home/test/.local/share/systemd/user/sysc-lock-session.service    │
+│                                                                            │
+│  Nothing was enabled or started. Activate the unit in a coordinated Niri   │
+│  session (README → Usage).                                                 │
+│                                                                            │
+│  A running sysc-lock (pid 4242) keeps the previous binary until sysc-      │
+│  lock-session.service restarts.                                            │
+│                                                                            │
+│  >see you space cowboy                                                     │
+│                                                                            │
+│  Press Enter to exit                                                       │
+╰────────────────────────────────────────────────────────────────────────────╯
+
+                          Enter: Exit  •  Ctrl+C: Quit                          

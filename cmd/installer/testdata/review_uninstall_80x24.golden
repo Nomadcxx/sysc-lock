@@ -1,0 +1,14 @@
+                             sysc-lock uninstaller                              
+╭────────────────────────────────────────────────────────────────────────────╮
+│  Uninstall from /home/test/.local                                          │
+│  Source: build ./cmd/sysc-lock in /src/sysc-lock                           │
+│                                                                            │
+│  Will remove:                                                              │
+│    /home/test/.local/bin/sysc-lock                                         │
+│    /home/test/.local/share/systemd/user/sysc-lock-session.service          │
+│                                                                            │
+│  Change with --prefix PATH. Nothing is enabled or started; PAM and config  │
+│  are untouched.                                                            │
+╰────────────────────────────────────────────────────────────────────────────╯
+
+                Enter: Uninstall  •  Esc: Back  •  Ctrl+C: Quit                 

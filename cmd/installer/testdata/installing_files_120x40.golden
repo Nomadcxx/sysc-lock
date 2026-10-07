@@ -1,0 +1,25 @@
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+
+                                                  sysc-lock installer                                                   
+
+
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                    │
+│    Check prefix                                                                                                    │
+│    Check toolchain                                                                                                 │
+│  [OK] Build sysc-lock                                                                                              │
+│    Check candidate                                                                                                 │
+│    Create directories                                                                                              │
+│  ⣾  Installing sysc-lock                                                                                           │
+│    ├─ Copy to bin/sysc-lock.new                                                                                    │
+│    └─ ⣾  Replace bin/sysc-lock                                                                                     │
+│    Install user unit                                                                                               │
+│                                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+                                                     Writing files…                                                     

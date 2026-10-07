@@ -73,10 +73,13 @@ type runner struct {
 }
 
 type runnerState struct {
-	status []taskStatus
-	sub    [][]taskStatus
-	skips  map[int]string
-	notes  []string
+	status    []taskStatus
+	sub       [][]taskStatus
+	skips     map[int]string
+	notes     []string
+	failedIdx int
+	errDetail string
+	cmdLine   string
 }
 
 func newRunner(opts options, log *logger) *runner {
@@ -112,10 +115,13 @@ func (r *runner) snapshot() runnerState {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	st := runnerState{
-		status: append([]taskStatus(nil), r.status...),
-		sub:    make([][]taskStatus, len(r.subStat)),
-		skips:  map[int]string{},
-		notes:  append([]string(nil), r.notes...),
+		status:    append([]taskStatus(nil), r.status...),
+		sub:       make([][]taskStatus, len(r.subStat)),
+		skips:     map[int]string{},
+		notes:     append([]string(nil), r.notes...),
+		failedIdx: r.failedIdx,
+		errDetail: r.errDetail,
+		cmdLine:   r.cmdLine,
 	}
 	for i, s := range r.subStat {
 		st.sub[i] = append([]taskStatus(nil), s...)
