@@ -55,6 +55,7 @@ type View struct {
 	errTerm    bool
 	printStart time.Time
 	joltStart  time.Time
+	logoScaled *image.NRGBA
 }
 
 func NewView(pal theme.Palette, user, host string) *View {
@@ -161,7 +162,8 @@ func fillRect(fb *render.Framebuffer, r image.Rectangle, c color.NRGBA) {
 	r = r.Intersect(fb.Bounds())
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
-			fb.Set(x, y, c)
+			i := y*fb.Stride + x*4
+			fb.Pix[i], fb.Pix[i+1], fb.Pix[i+2], fb.Pix[i+3] = c.B, c.G, c.R, 0xFF
 		}
 	}
 }
@@ -396,21 +398,24 @@ func (v *View) drawLogo(fb *render.Framebuffer, r image.Rectangle, tint color.NR
 	if w < 1 || h < 1 {
 		return
 	}
-	scaled := image.NewNRGBA(image.Rect(0, 0, w, h))
-	xdraw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), src, src.Bounds(), xdraw.Over, nil)
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			a := uint32(scaled.Pix[scaled.PixOffset(x, y)+3])
+	// ponytail: retain one size; differing outputs rescale. Move the cache
+	// per output if a measured multi-output workload needs multiple sizes.
+	if v.logoScaled == nil || v.logoScaled.Bounds().Size() != r.Size() {
+		v.logoScaled = image.NewNRGBA(image.Rect(0, 0, w, h))
+		xdraw.ApproxBiLinear.Scale(v.logoScaled, v.logoScaled.Bounds(), src, src.Bounds(), xdraw.Over, nil)
+	}
+	clipped := r.Intersect(fb.Bounds())
+	for y := clipped.Min.Y; y < clipped.Max.Y; y++ {
+		for x := clipped.Min.X; x < clipped.Max.X; x++ {
+			a := uint32(v.logoScaled.Pix[v.logoScaled.PixOffset(x-r.Min.X, y-r.Min.Y)+3])
 			if a == 0 {
 				continue
 			}
-			dst := color.NRGBAModel.Convert(fb.At(r.Min.X+x, r.Min.Y+y)).(color.NRGBA)
-			fb.Set(r.Min.X+x, r.Min.Y+y, color.NRGBA{
-				R: uint8((uint32(dst.R)*(255-a) + uint32(tint.R)*a) / 255),
-				G: uint8((uint32(dst.G)*(255-a) + uint32(tint.G)*a) / 255),
-				B: uint8((uint32(dst.B)*(255-a) + uint32(tint.B)*a) / 255),
-				A: 0xFF,
-			})
+			i := y*fb.Stride + x*4
+			fb.Pix[i] = uint8((uint32(fb.Pix[i])*(255-a) + uint32(tint.B)*a) / 255)
+			fb.Pix[i+1] = uint8((uint32(fb.Pix[i+1])*(255-a) + uint32(tint.G)*a) / 255)
+			fb.Pix[i+2] = uint8((uint32(fb.Pix[i+2])*(255-a) + uint32(tint.R)*a) / 255)
+			fb.Pix[i+3] = 0xFF
 		}
 	}
 }

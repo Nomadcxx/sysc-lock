@@ -1,6 +1,7 @@
 package lockd
 
 import (
+	"bytes"
 	"image"
 	"image/color"
 	"math"
@@ -13,7 +14,84 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
+	xdraw "golang.org/x/image/draw"
 )
+
+func TestLogoRenderingReusesScalingAndPreservesPixels(t *testing.T) {
+	v := NewView(theme.Default(), "user", "host")
+	fb, want := render.New(80, 40), render.New(80, 40)
+	r := image.Rect(-10, 3, 90, 35)
+	tint := color.NRGBA{R: 31, G: 120, B: 210, A: 255}
+	ground := color.NRGBA{R: 190, G: 81, B: 17, A: 255}
+	check := func() {
+		t.Helper()
+		fb.Fill(ground)
+		want.Fill(ground)
+		scaled := image.NewNRGBA(image.Rect(0, 0, r.Dx(), r.Dy()))
+		xdraw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), art.Logo(), art.Logo().Bounds(), xdraw.Over, nil)
+		for y := 0; y < r.Dy(); y++ {
+			for x := 0; x < r.Dx(); x++ {
+				a := uint32(scaled.Pix[scaled.PixOffset(x, y)+3])
+				if a == 0 {
+					continue
+				}
+				dst := color.NRGBAModel.Convert(want.At(r.Min.X+x, r.Min.Y+y)).(color.NRGBA)
+				want.Set(r.Min.X+x, r.Min.Y+y, color.NRGBA{
+					R: uint8((uint32(dst.R)*(255-a) + uint32(tint.R)*a) / 255),
+					G: uint8((uint32(dst.G)*(255-a) + uint32(tint.G)*a) / 255),
+					B: uint8((uint32(dst.B)*(255-a) + uint32(tint.B)*a) / 255), A: 255})
+			}
+		}
+		v.drawLogo(fb, r, tint)
+		if !bytes.Equal(fb.Pix, want.Pix) {
+			t.Fatal("logo pixels changed")
+		}
+	}
+	check()
+	r = image.Rect(4, -2, 76, 42)
+	tint.R = 220 // changing geometry and theme must remain correct.
+	check()
+	if allocations := testing.AllocsPerRun(3, func() { v.drawLogo(fb, r, tint) }); allocations > 1 {
+		t.Fatalf("steady logo rendering allocates %.0f objects per frame", allocations)
+	}
+}
+
+func BenchmarkForeground1080p(b *testing.B) {
+	v := NewView(theme.Default(), "user", "host")
+	v.Scale, v.Reduced = 1.25, true
+	v.Hint, v.Ambient = "F1 Options - Enter Unlock", "|||| 63% - Wi-Fi - playing"
+	fb := render.New(1920, 1080)
+	now := time.Unix(10, 0)
+	v.Render(fb, now)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		v.Render(fb, now)
+	}
+}
+
+func TestFillRectClipsWithoutAllocating(t *testing.T) {
+	fb := render.New(8, 6)
+	fb.Fill(color.NRGBA{R: 17})
+	r := image.Rect(-3, 2, 5, 10)
+	ink := color.NRGBA{R: 200, G: 21, B: 82, A: 123}
+	allocations := testing.AllocsPerRun(3, func() { fillRect(fb, r, ink) })
+	if allocations != 0 {
+		t.Fatalf("panel fill allocated %.0f objects", allocations)
+	}
+	for y := range fb.Height {
+		for x := range fb.Width {
+			want := color.NRGBA{R: 17, A: 255}
+			if image.Pt(x, y).In(r) {
+				want = ink
+				want.A = 255
+			}
+			if got := fb.At(x, y); got != want {
+				t.Fatalf("pixel %d,%d = %v, want %v", x, y, got, want)
+			}
+		}
+	}
+}
 
 func TestErrorAutoClear4s(t *testing.T) {
 	v := NewView(theme.Default(), "nomadx", "host")
