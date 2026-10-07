@@ -26,22 +26,20 @@ var (
 	skipMark  = lipgloss.NewStyle().Foreground(WarningColor).SetString("[SKIP]")
 )
 
-// asciiHeaderLines is the block banner; the canvas adds two padding rows and a
-// status line, which is the 11-row header the spec pins.
+// asciiHeaderLines is the block banner from sysc-lock.txt, verbatim. The
+// canvas adds one padding row above and below, so the banner is
+// 4 + 2 = 6 rows tall and is only drawn when the terminal
+// is wide enough to show all of it (animations.Render clips, never wraps).
 var asciiHeaderLines = []string{
-	" ████░░░██   ██░ ████░░░ ░█████░ ██░░░░░ ░█████░ ░█████░██░░░██",
-	"███████░██░░░██░███████░███████░ ██░░░░░███████░███████░██░░██░",
-	"███░   ░ ██░██░░███░   ░██░    ░ ██░░░░░██░░░████░    ░██░██░░",
-	" ████░░░  ███░░░ ████░░░██░      ██░░░░░██░░░████░     ████░░░",
-	" ░█████░  ██░░░░ ░█████░██░      ██░░░░░██░░░████░     ████░░░",
-	"     ██  ██░░░░     █████████░ ██░░░░░███████░███████░██░██░░",
-	"███████░  ██░░░░███████░ ░█████░ ███████ ░█████░ ░█████░██░░██░",
-	" ░█████░  ██░░░░ ░█████░ ░░███░░ ███████ ░███░░ ░░███░░██░░░██",
+	"███████ ██   ██  ███████  ▄█████      ██     ███████   ▄█████ ██  ▄██",
+	" ▀██▄   ██▄  ██   ▀██▄   ██▀     ▄▄▄▄ ██     ██   ██  ██▀     █████▀ ",
+	"▄▄▄███▄  ▀█████  ▄▄▄███▄ ██▄▄▄▄▄ ▀▀▀▀ ██▄▄██ ██▄▄▄██  ██▄▄▄▄▄ ██▀▀██▄",
+	"▀▀▀▀▀▀▀      ▀▀  ▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀      ▀▀▀▀▀▀ ▀▀▀▀▀▀▀  ▀▀▀▀▀▀▀ ▀▀   ▀▀",
 }
 
-// bannerRows is the spec's header height: eight art rows plus padding, and
-// the canvas renders exactly this many rows whatever the window does.
-const bannerRows = 11
+// bannerRows is the canvas height: the art rows plus the padding the
+// canvas adds, and Render paints exactly this many rows.
+const bannerRows = 6
 
 type step int
 
@@ -278,4 +276,3 @@ func (m model) helpText() string {
 func bannerLines(m model) []string { return strings.Split(m.beams.Render(), "\n") }
 
 // View is replaced by view.go with the full greet layout.
-func (m model) View() string { return strings.Join(bannerLines(m), "\n") }

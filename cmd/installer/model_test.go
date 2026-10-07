@@ -164,15 +164,15 @@ func TestFailedStepQuitIsOne(t *testing.T) {
 	}
 }
 
-func TestResizeKeepsBannerElevenRows(t *testing.T) {
+func TestBannerHeightFollowsTheArt(t *testing.T) {
 	m := newTestModel(t)
 	m, _ = m.update(tea.WindowSizeMsg{Width: 100, Height: 12})
-	if got := len(bannerLines(m)); got != 11 {
-		t.Fatalf("banner rows=%d, want 11 at height 12", got)
+	if got := len(bannerLines(m)); got != bannerRows {
+		t.Fatalf("banner rows=%d, want %d at height 12", got, bannerRows)
 	}
 	m, _ = m.update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	if got := len(bannerLines(m)); got != 11 {
-		t.Fatalf("banner rows=%d, want 11 at height 40", got)
+	if got := len(bannerLines(m)); got != bannerRows {
+		t.Fatalf("banner rows=%d, want %d at height 40", got, bannerRows)
 	}
 }
 
