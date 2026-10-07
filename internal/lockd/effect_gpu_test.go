@@ -201,6 +201,21 @@ func TestGpuBackendInit(t *testing.T) {
 	}
 }
 
+// TestGpuPlatformReportsRenderer pins the diagnostic contract: with a render
+// node present the backend must come up on the GBM platform, and it always
+// records what actually renders so a live journal shows llvmpipe instead of
+// silently accepting software for gpu.
+func TestGpuPlatformReportsRenderer(t *testing.T) {
+	b := newTestGpuBackend(t, "rain", 8, 8)
+	if b.platform == "" || b.renderer == "" {
+		t.Fatalf("platform=%q renderer=%q, want both non-empty", b.platform, b.renderer)
+	}
+	t.Logf("platform=%s renderer=%q vendor=%q", b.platform, b.renderer, b.vendor)
+	if _, err := os.Stat("/dev/dri/renderD128"); err == nil && b.platform != "gbm" {
+		t.Errorf("renderD128 present but platform=%q, want gbm hardware path", b.platform)
+	}
+}
+
 func TestGpuRainFrame(t *testing.T) { gpuEffectFrame(t, "rain") }
 
 // GPU-vs-GPU determinism is the gate the CPU side can never offer: the

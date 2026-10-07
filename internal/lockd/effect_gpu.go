@@ -6,6 +6,57 @@ package lockd
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include <stdlib.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+// EGL_PLATFORM_GBM_KHR numbers the GBM platform; older eglext.h sets may miss it.
+#ifndef EGL_PLATFORM_GBM_KHR
+#define EGL_PLATFORM_GBM_KHR 0x31D7
+#endif
+
+// GBM is resolved at runtime so the build needs no gbm at link time: a host
+// without libgbm or a render node falls back to the surfaceless platform.
+struct gbm_device;
+static void *gpu_gbm_lib = NULL;
+static int gpu_gbm_fd = -1;
+static struct gbm_device *gpu_gbm_dev = NULL;
+
+static void gpu_gbm_close(void) {
+	if (gpu_gbm_dev != NULL) {
+		typedef void (*destroy_fn)(struct gbm_device *);
+		destroy_fn destroy = (destroy_fn)dlsym(gpu_gbm_lib, "gbm_device_destroy");
+		if (destroy != NULL) { destroy(gpu_gbm_dev); }
+		gpu_gbm_dev = NULL;
+	}
+	if (gpu_gbm_fd >= 0) { close(gpu_gbm_fd); gpu_gbm_fd = -1; }
+	if (gpu_gbm_lib != NULL) { dlclose(gpu_gbm_lib); gpu_gbm_lib = NULL; }
+}
+
+// gpu_gbm_display binds the first render node to EGL's GBM platform, the path
+// that reaches the hardware driver. EGL_NO_DISPLAY means no hardware path;
+// the caller falls back to the surfaceless (software) platform. One device per
+// process: the renderer keeps a single backend alive and the Go side
+// serializes every EGL call behind one mutex.
+static EGLDisplay gpu_gbm_display(void) {
+	typedef struct gbm_device *(*create_fn)(int);
+	typedef EGLDisplay (*get_platform_fn)(EGLenum, void *, const EGLint *);
+	get_platform_fn get = (get_platform_fn)eglGetProcAddress("eglGetPlatformDisplay");
+	if (get == NULL) { return EGL_NO_DISPLAY; }
+	gpu_gbm_close(); // a previous attempt leaves nothing behind
+	gpu_gbm_lib = dlopen("libgbm.so.1", RTLD_NOW | RTLD_LOCAL);
+	if (gpu_gbm_lib == NULL) { return EGL_NO_DISPLAY; }
+	create_fn create = (create_fn)dlsym(gpu_gbm_lib, "gbm_create_device");
+	if (create == NULL) { gpu_gbm_close(); return EGL_NO_DISPLAY; }
+	// ponytail: renderD128 only, iterate nodes if multi-GPU selection matters.
+	gpu_gbm_fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
+	if (gpu_gbm_fd < 0) { gpu_gbm_close(); return EGL_NO_DISPLAY; }
+	gpu_gbm_dev = create(gpu_gbm_fd);
+	if (gpu_gbm_dev == NULL) { gpu_gbm_close(); return EGL_NO_DISPLAY; }
+	EGLDisplay d = get(EGL_PLATFORM_GBM_KHR, gpu_gbm_dev, NULL);
+	if (d == EGL_NO_DISPLAY) { gpu_gbm_close(); return EGL_NO_DISPLAY; }
+	return d;
+}
 
 // cgo gives every `void *` EGL typedef an opaque Go type that cannot be compared
 // against nil, so the null handles are fetched through typed C helpers instead.
@@ -29,6 +80,7 @@ import "C"
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -101,6 +153,7 @@ var (
 	eglNone      = C.gpu_no_display()
 	eglNoContext = C.gpu_no_context()
 	eglNoSurface = C.gpu_no_surface()
+	eglNoConfig  = C.gpu_no_config()
 )
 
 // shaderUniforms is the shared uniform contract of every effect pass.
@@ -112,6 +165,10 @@ type shaderUniforms struct {
 type gpuBackend struct {
 	effect, palette string
 	pal             []float32
+
+	// What EGL actually provided, for diagnostics: "gbm" is the render node.
+	// "surfaceless" and "default" can still resolve to a software rasterizer.
+	platform, renderer, vendor string
 
 	display C.EGLDisplay
 	ctx     C.EGLContext
@@ -176,32 +233,49 @@ func newGpuBackend(effect, palette string, width, height int) (EffectBackend, er
 		b.close()
 		return nil, err
 	}
+	if b.renderer != "" {
+		fmt.Fprintf(os.Stderr, "sysc-lock: gpu: platform=%s renderer=%q vendor=%q\n",
+			b.platform, b.renderer, b.vendor)
+	}
 	return b, nil
 }
 
 func (b *gpuBackend) init() error {
-	dpy, err := eglOpenDisplay()
+	dpy, platform, err := eglOpenDisplay()
 	if err != nil {
 		return err
 	}
 	b.display = dpy
+	b.platform = platform
 
-	cfg, err := eglChooseConfig(dpy)
-	if err != nil {
-		return err
-	}
-	if b.ctx, err = eglCreateContext(dpy, cfg); err != nil {
-		return err
-	}
-	// A 1x1 pbuffer exists only to satisfy makeCurrent; the FBO does the real
-	// rendering. A real surface keeps one code path on drivers that do not
-	// advertise EGL_KHR_no_config_context.
-	if b.surface, err = eglCreatePbuffer(dpy, cfg); err != nil {
-		return err
+	// A window-less context. Prefer a real config plus a 1x1 pbuffer whose only
+	// job is satisfying makeCurrent, but Mesa's GBM platform advertises no
+	// pbuffer configs, so fall back to EGL_KHR_no_config_context with
+	// EGL_NO_SURFACE, which surfaceless-context support allows. The FBO does
+	// the real rendering either way.
+	cfg, cfgErr := eglChooseConfig(dpy)
+	if cfgErr == nil {
+		if b.ctx, err = eglCreateContext(dpy, cfg); err != nil {
+			return err
+		}
+		if b.surface, err = eglCreatePbuffer(dpy, cfg); err != nil {
+			return err
+		}
+	} else {
+		if !eglHasExtension(dpy, "EGL_KHR_no_config_context") ||
+			!eglHasExtension(dpy, "EGL_KHR_surfaceless_context") {
+			return fmt.Errorf("gpu: no usable config (%v) and no surfaceless context support", cfgErr)
+		}
+		if b.ctx, err = eglCreateContext(dpy, eglNoConfig); err != nil {
+			return err
+		}
+		b.surface = eglNoSurface
 	}
 	if err = eglMakeCurrent(dpy, b.surface, b.surface, b.ctx); err != nil {
 		return err
 	}
+	b.renderer = glString(C.GL_RENDERER)
+	b.vendor = glString(C.GL_VENDOR)
 	stepFS, drawFS, ok := effectShaders(b.effect)
 	if !ok {
 		return fmt.Errorf("gpu: no shader for effect %q", b.effect)
@@ -468,6 +542,7 @@ func (b *gpuBackend) close() error {
 			C.eglDestroySurface(b.display, b.surface)
 		}
 		C.eglTerminate(b.display)
+		C.gpu_gbm_close()
 	}
 	if b.threaded {
 		runtime.UnlockOSThread()
@@ -478,26 +553,45 @@ func (b *gpuBackend) close() error {
 
 // --- EGL setup -----------------------------------------------------------
 
-func eglOpenDisplay() (C.EGLDisplay, error) {
-	// Mesa advertises surfaceless rendering as a client-side platform extension,
-	// visible through a NULL-display query. NVIDIA's EGL does not, which is why
-	// the default-display path below has to stay.
+// eglOpenDisplay picks the EGL display in order of how much hardware it
+// reaches: the GBM platform of the render node first, the surfaceless platform
+// second (Mesa resolves it to the software rasterizer), and the default
+// display last (surfaceless is a client-side extension that NVIDIA's EGL does
+// not advertise, so the legacy path stays). The platform name rides along for
+// the diagnostics line.
+func eglOpenDisplay() (C.EGLDisplay, string, error) {
+	if d := C.gpu_gbm_display(); d != eglNone {
+		if eglInitialize(d) == nil {
+			return d, "gbm", nil
+		}
+		C.eglTerminate(d)
+		C.gpu_gbm_close()
+	}
 	if eglHasExtension(eglNone, "EGL_MESA_platform_surfaceless") {
 		if d := C.gpu_surfaceless_display(); d != eglNone {
 			if eglInitialize(d) == nil {
-				return d, nil
+				return d, "surfaceless", nil
 			}
 			C.eglTerminate(d)
 		}
 	}
 	d := C.gpu_default_display()
 	if d == eglNone {
-		return eglNone, fmt.Errorf("gpu: no EGL display")
+		return eglNone, "", fmt.Errorf("gpu: no EGL display")
 	}
 	if err := eglInitialize(d); err != nil {
-		return eglNone, err
+		return eglNone, "", err
 	}
-	return d, nil
+	return d, "default", nil
+}
+
+// glString reads one GL string (GL_RENDERER, GL_VENDOR) as Go.
+func glString(name C.GLenum) string {
+	p := C.glGetString(name)
+	if p == nil {
+		return ""
+	}
+	return C.GoString((*C.char)(unsafe.Pointer(p)))
 }
 
 func eglInitialize(d C.EGLDisplay) error {
