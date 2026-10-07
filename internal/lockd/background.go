@@ -199,7 +199,7 @@ func (c *Client) SetMotionFrozen(frozen bool, now time.Time) {
 	c.publish()
 }
 func (c *Client) scheduleBackground(out *lockOut, now time.Time) {
-	if (c.effect == "" && c.wallpaper == nil) || out.backdrop != nil || out.removed || out.callback != nil || (c.wallpaper == nil && !c.motionAllowed(now)) {
+	if (c.effect == "" && c.wallpaper == nil) || out.removed || out.callback != nil || (c.wallpaper == nil && !c.motionAllowed(now)) {
 		return
 	}
 	b := out.background
@@ -339,7 +339,7 @@ func (c *Client) backgroundStatus(now time.Time) string {
 	}
 	backdrop := false
 	for _, out := range c.outputs {
-		if out.backdrop != nil && out.blurW == out.w && out.blurH == out.h {
+		if c.effect == "" && c.wallpaper == nil && out.backdrop != nil && out.blurW == out.w && out.blurH == out.h {
 			backdrop = true
 			continue
 		}
