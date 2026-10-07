@@ -18,6 +18,19 @@ import (
 	xdraw "golang.org/x/image/draw"
 )
 
+func TestAmbientReplacesUnsupportedGlyphs(t *testing.T) {
+	v := NewView(theme.Default(), "user", "host")
+	s := Layout(960, 720, 1, v.StyleName, "12:34 PM")
+	a, b := render.New(960, 720), render.New(960, 720)
+	v.Ambient = "playing | Song \U0010ffff - Artist"
+	v.drawAmbient(a, s)
+	v.Ambient = "playing | Song ? - Artist"
+	v.drawAmbient(b, s)
+	if !bytes.Equal(a.Pix, b.Pix) {
+		t.Fatal("unsupported metadata glyph did not render as readable fallback")
+	}
+}
+
 func TestCaretUsesFrameTimeAndHonorsReducedMotion(t *testing.T) {
 	v := NewView(theme.Default(), "user", "host")
 	fb := render.New(800, 600)
@@ -792,7 +805,7 @@ func TestParityWarningsAndScreensaverFitCompactOutputs(t *testing.T) {
 				t.Fatal("feedback overlaps")
 			}
 			saver := ScreensaverLayout(size[0], size[1], 1, style, widestClock)
-			if saver.Logo.Empty() || saver.Banner.Empty() || saver.Date.Empty() || !saver.Bounds().In(output) {
+			if saver.Logo.Empty() || saver.Banner.Empty() || saver.ClockBox.Empty() || saver.Date.Empty() || !saver.Bounds().In(output) {
 				t.Fatalf("%v %s incomplete saver: %+v", size, style, saver)
 			}
 			if !saver.Entry.Empty() || !saver.Frame.Empty() {

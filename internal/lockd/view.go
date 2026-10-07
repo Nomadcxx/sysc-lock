@@ -381,7 +381,15 @@ func (v *View) drawAmbient(fb *render.Framebuffer, s Scene) {
 	if box.Empty() {
 		return
 	}
-	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Ambient, v.textPx(14, box), v.muted())
+	px := v.textPx(14, box)
+	f := face(px)
+	text := strings.Map(func(r rune) rune {
+		if _, ok := f.GlyphAdvance(r); !ok {
+			return '?'
+		}
+		return r
+	}, v.Ambient)
+	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, text, px, v.muted())
 }
 
 func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p MenuView) {
