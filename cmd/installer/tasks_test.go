@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -231,5 +232,123 @@ func TestCandidateSkipsToolchainAndBuild(t *testing.T) {
 	bin, err := os.ReadFile(opts.prefix + "/bin/sysc-lock")
 	if err != nil || string(bin) != "#!/bin/sh\n" {
 		t.Errorf("binary = %q, %v", bin, err)
+	}
+}
+
+func uninstallOpts(t *testing.T) options {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	return options{prefix: t.TempDir() + "/.local", uninstall: true}
+}
+
+func seedInstall(t *testing.T, prefix string) {
+	t.Helper()
+	if err := installDirs(prefix); err != nil {
+		t.Fatal(err)
+	}
+	for path, data := range map[string]string{
+		prefix + "/share/systemd/user/sysc-lock-session.service": "[Service]\n",
+		prefix + "/bin/sysc-lock":                                "#!/bin/sh\n",
+		prefix + "/bin/sysc-lock.new":                            "stale\n",
+	} {
+		if err := os.WriteFile(path, []byte(data), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestUninstallRemovesUnitBinaryAndStagedFile(t *testing.T) {
+	opts := uninstallOpts(t)
+	seedInstall(t, opts.prefix)
+	r := newRunner(opts, testLogger(t))
+	if err := r.runAll(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/bin/sysc-lock", "/bin/sysc-lock.new", "/share/systemd/user/sysc-lock-session.service"} {
+		if _, err := os.Stat(opts.prefix + p); !os.IsNotExist(err) {
+			t.Errorf("%s survived removal", p)
+		}
+	}
+	if fi, err := os.Stat(opts.prefix + "/bin"); err != nil || !fi.IsDir() {
+		t.Error("directories must survive the uninstall")
+	}
+	st := r.snapshot()
+	if len(st.status) != 4 {
+		t.Fatalf("task count = %d", len(st.status))
+	}
+	for i, s := range st.status {
+		if s != statusDone {
+			t.Errorf("task %d status = %v", i, s)
+		}
+	}
+}
+
+func TestUninstallEmptyPrefixSkipsRemovals(t *testing.T) {
+	opts := uninstallOpts(t)
+	r := newRunner(opts, testLogger(t))
+	if err := r.runAll(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	st := r.snapshot()
+	if st.status[2] != statusSkipped || st.skips[2] != "unit not installed" {
+		t.Errorf("unit task = %v %q", st.status[2], st.skips[2])
+	}
+	if st.status[3] != statusSkipped || st.skips[3] != "nothing installed" {
+		t.Errorf("binary task = %v %q", st.status[3], st.skips[3])
+	}
+}
+
+func TestUninstallRefusesWhileRunning(t *testing.T) {
+	opts := uninstallOpts(t)
+	seedInstall(t, opts.prefix)
+	sleepBin, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("no sleep binary")
+	}
+	data, err := os.ReadFile(sleepBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := opts.prefix + "/bin/sysc-lock"
+	if err := os.WriteFile(live, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(live, "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+
+	r := newRunner(opts, testLogger(t))
+	err = r.runAll(context.Background(), nil)
+	want := fmt.Sprintf("sysc-lock is running (pid %d) from %s: "+
+		"stop sysc-lock-session.service in a coordinated Niri session first", cmd.Process.Pid, live)
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(opts.prefix + "/share/systemd/user/sysc-lock-session.service"); err != nil {
+		t.Error("unit removed despite the refusal")
+	}
+}
+
+func TestUninstallRefusesWhenUnitEnabled(t *testing.T) {
+	opts := uninstallOpts(t)
+	seedInstall(t, opts.prefix)
+	wants := os.Getenv("XDG_CONFIG_HOME") + "/systemd/user/graphical-session.target.wants"
+	if err := os.MkdirAll(wants, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := wants + "/sysc-lock-session.service"
+	if err := os.Symlink(opts.prefix+"/share/systemd/user/sysc-lock-session.service", link); err != nil {
+		t.Fatal(err)
+	}
+	r := newRunner(opts, testLogger(t))
+	err := r.runAll(context.Background(), nil)
+	want := "sysc-lock-session.service is enabled (" + link + "): disable it first"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(opts.prefix + "/bin/sysc-lock"); err != nil {
+		t.Error("binary removed despite the refusal")
 	}
 }

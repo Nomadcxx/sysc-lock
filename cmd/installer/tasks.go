@@ -344,12 +344,56 @@ func installTasks() []task {
 	}
 }
 
-// ponytail: placeholder table until Task 10 fills in the uninstall steps.
+// uninstallTasks reverses exactly the files an install wrote: the user unit
+// and the binary, plus a stale .new. Directories, user config, runtime state
+// and PAM are never touched.
 func uninstallTasks() []task {
 	return []task{
 		{name: "Check prefix", description: "Validating install prefix",
 			fn: func(_ context.Context, r *runner, _ func(int, taskStatus)) error {
 				return validatePrefix(r.opts.prefix)
+			}},
+		{name: "Check service", description: "Checking for a running or enabled sysc-lock",
+			fn: func(_ context.Context, r *runner, _ func(int, taskStatus)) error {
+				if owners := runningLockOwners(r.opts.prefix + "/bin/sysc-lock"); len(owners) > 0 {
+					return fmt.Errorf("sysc-lock is running (pid %d) from %s: "+
+						"stop sysc-lock-session.service in a coordinated Niri session first",
+						owners[0].pid, owners[0].exe)
+				}
+				links, err := enabledUnitLinks()
+				if err != nil {
+					return err
+				}
+				if len(links) > 0 {
+					return fmt.Errorf("sysc-lock-session.service is enabled (%s): disable it first", links[0])
+				}
+				return nil
+			}},
+		{name: "Remove user unit", description: "Removing sysc-lock-session.service",
+			fn: func(_ context.Context, r *runner, _ func(int, taskStatus)) error {
+				removed, err := removeIfExists(r.opts.prefix + "/share/systemd/user/sysc-lock-session.service")
+				if err != nil {
+					return err
+				}
+				if !removed {
+					return skipError{"unit not installed"}
+				}
+				return nil
+			}},
+		{name: "Remove binary", description: "Removing sysc-lock",
+			fn: func(_ context.Context, r *runner, _ func(int, taskStatus)) error {
+				removed, err := removeIfExists(r.opts.prefix + "/bin/sysc-lock")
+				if err != nil {
+					return err
+				}
+				staged, err := removeIfExists(r.opts.prefix + "/bin/sysc-lock.new")
+				if err != nil {
+					return err
+				}
+				if !removed && !staged {
+					return skipError{"nothing installed"}
+				}
+				return nil
 			}},
 	}
 }
