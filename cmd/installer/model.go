@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ const (
 const (
 	exitOK        = 0
 	exitFailed    = 1
+	exitUsage     = 2
 	exitCancelled = 130
 )
 
@@ -62,6 +64,10 @@ type tickMsg time.Time
 type runDoneMsg struct{ err error }
 
 type taskUpdateMsg struct{}
+
+// cancelMsg is a SIGTERM or SIGHUP that arrived while the TUI owned the
+// terminal. Raw mode turns Ctrl+C into a KeyMsg, so only signals need this.
+type cancelMsg struct{}
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
@@ -81,6 +87,8 @@ type model struct {
 	current   int // index of the running task, -1 when none
 	exitCode  int
 	cancelled bool
+	finalErr  error
+	sigs      <-chan os.Signal
 }
 
 func newModel(opts options) model {
@@ -95,9 +103,25 @@ func newModel(opts options) model {
 	}
 }
 
-func (m model) Init() tea.Cmd { return tickCmd() }
+func (m model) Init() tea.Cmd { return tea.Batch(tickCmd(), m.waitSignal()) }
 
-func (m model) Update(msg tea.Msg) (model, tea.Cmd) { return m.update(msg) }
+// waitSignal turns the first SIGTERM or SIGHUP into a cancelMsg.
+func (m model) waitSignal() tea.Cmd {
+	if m.sigs == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		if _, ok := <-m.sigs; !ok {
+			return nil
+		}
+		return cancelMsg{}
+	}
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	return next, cmd
+}
 
 // update is Update without the interface, so tests read model fields directly.
 func (m model) update(msg tea.Msg) (model, tea.Cmd) {
@@ -113,6 +137,14 @@ func (m model) update(msg tea.Msg) (model, tea.Cmd) {
 	case taskUpdateMsg:
 		m.refresh()
 		return m, m.waitUpdate()
+	case cancelMsg:
+		// A signal only cancels the build, exactly like Ctrl+C; a half-written
+		// file rename is never left behind.
+		if m.cancellable() {
+			m.cancelled = true
+			m.run.cancel()
+		}
+		return m, m.waitSignal()
 	case runDoneMsg:
 		return m.runDone(msg)
 	}
@@ -238,6 +270,7 @@ func (m model) cancellable() bool {
 }
 
 func (m model) runDone(msg runDoneMsg) (model, tea.Cmd) {
+	m.finalErr = msg.err
 	switch {
 	case msg.err == nil:
 		m.step = stepComplete
