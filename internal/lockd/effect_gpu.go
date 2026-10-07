@@ -6,6 +6,57 @@ package lockd
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include <stdlib.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+// EGL_PLATFORM_GBM_KHR numbers the GBM platform; older eglext.h sets may miss it.
+#ifndef EGL_PLATFORM_GBM_KHR
+#define EGL_PLATFORM_GBM_KHR 0x31D7
+#endif
+
+// GBM is resolved at runtime so the build needs no gbm at link time: a host
+// without libgbm or a render node falls back to the surfaceless platform.
+struct gbm_device;
+struct gpu_gbm {
+	void *lib;
+	int fd;
+	struct gbm_device *dev;
+};
+
+static void gpu_gbm_close(struct gpu_gbm *g) {
+	if (g->dev != NULL) {
+		typedef void (*destroy_fn)(struct gbm_device *);
+		destroy_fn destroy = (destroy_fn)dlsym(g->lib, "gbm_device_destroy");
+		if (destroy != NULL) { destroy(g->dev); }
+		g->dev = NULL;
+	}
+	if (g->fd >= 0) { close(g->fd); g->fd = -1; }
+	if (g->lib != NULL) { dlclose(g->lib); g->lib = NULL; }
+}
+
+// gpu_gbm_display binds the first render node to EGL's GBM platform, the path
+// that reaches the hardware driver. EGL_NO_DISPLAY means no hardware path;
+// the caller falls back to the surfaceless platform. Each backend owns its
+// device until its EGL display has been terminated.
+static EGLDisplay gpu_gbm_display(struct gpu_gbm *g) {
+	typedef struct gbm_device *(*create_fn)(int);
+	typedef EGLDisplay (*get_platform_fn)(EGLenum, void *, const EGLint *);
+	get_platform_fn get = (get_platform_fn)eglGetProcAddress("eglGetPlatformDisplay");
+	if (get == NULL) { return EGL_NO_DISPLAY; }
+	g->lib = dlopen("libgbm.so.1", RTLD_NOW | RTLD_LOCAL);
+	if (g->lib == NULL) { return EGL_NO_DISPLAY; }
+	create_fn create = (create_fn)dlsym(g->lib, "gbm_create_device");
+	if (create == NULL) { gpu_gbm_close(g); return EGL_NO_DISPLAY; }
+	// ponytail: renderD128 only, iterate nodes if multi-GPU selection matters.
+	g->fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
+	if (g->fd < 0) { gpu_gbm_close(g); return EGL_NO_DISPLAY; }
+	g->dev = create(g->fd);
+	if (g->dev == NULL) { gpu_gbm_close(g); return EGL_NO_DISPLAY; }
+	EGLDisplay d = get(EGL_PLATFORM_GBM_KHR, g->dev, NULL);
+	if (d == EGL_NO_DISPLAY) { gpu_gbm_close(g); return EGL_NO_DISPLAY; }
+	return d;
+}
 
 // cgo gives every `void *` EGL typedef an opaque Go type that cannot be compared
 // against nil, so the null handles are fetched through typed C helpers instead.
@@ -29,6 +80,7 @@ import "C"
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -101,6 +153,7 @@ var (
 	eglNone      = C.gpu_no_display()
 	eglNoContext = C.gpu_no_context()
 	eglNoSurface = C.gpu_no_surface()
+	eglNoConfig  = C.gpu_no_config()
 )
 
 // shaderUniforms is the shared uniform contract of every effect pass.
@@ -113,7 +166,12 @@ type gpuBackend struct {
 	effect, palette string
 	pal             []float32
 
+	// What EGL actually provided, for diagnostics: "gbm" is the render node.
+	// "surfaceless" and "default" can still resolve to a software rasterizer.
+	platform, renderer, vendor string
+
 	display C.EGLDisplay
+	gbm     *C.struct_gpu_gbm
 	ctx     C.EGLContext
 	surface C.EGLSurface
 
@@ -166,7 +224,7 @@ func newGpuBackend(effect, palette string, width, height int) (EffectBackend, er
 	// onto another one between calls, which would leave GL without a context.
 	runtime.LockOSThread()
 	b := &gpuBackend{effect: effect, palette: palette, pal: pal,
-		threaded: true, seed: effectSeed(effect, palette)}
+		threaded: true, gbm: &C.struct_gpu_gbm{fd: -1}, seed: effectSeed(effect, palette)}
 
 	if err := b.init(); err != nil {
 		b.close() // tolerates a half-built state and unpins the thread
@@ -176,32 +234,49 @@ func newGpuBackend(effect, palette string, width, height int) (EffectBackend, er
 		b.close()
 		return nil, err
 	}
+	if b.renderer != "" {
+		fmt.Fprintf(os.Stderr, "sysc-lock: gpu: platform=%s renderer=%q vendor=%q\n",
+			b.platform, b.renderer, b.vendor)
+	}
 	return b, nil
 }
 
 func (b *gpuBackend) init() error {
-	dpy, err := eglOpenDisplay()
+	dpy, platform, err := eglOpenDisplay(b.gbm)
 	if err != nil {
 		return err
 	}
 	b.display = dpy
+	b.platform = platform
 
-	cfg, err := eglChooseConfig(dpy)
-	if err != nil {
-		return err
-	}
-	if b.ctx, err = eglCreateContext(dpy, cfg); err != nil {
-		return err
-	}
-	// A 1x1 pbuffer exists only to satisfy makeCurrent; the FBO does the real
-	// rendering. A real surface keeps one code path on drivers that do not
-	// advertise EGL_KHR_no_config_context.
-	if b.surface, err = eglCreatePbuffer(dpy, cfg); err != nil {
-		return err
+	// A window-less context. Prefer a real config plus a 1x1 pbuffer whose only
+	// job is satisfying makeCurrent, but Mesa's GBM platform advertises no
+	// pbuffer configs, so fall back to EGL_KHR_no_config_context with
+	// EGL_NO_SURFACE, which surfaceless-context support allows. The FBO does
+	// the real rendering either way.
+	cfg, cfgErr := eglChooseConfig(dpy)
+	if cfgErr == nil {
+		if b.ctx, err = eglCreateContext(dpy, cfg); err != nil {
+			return err
+		}
+		if b.surface, err = eglCreatePbuffer(dpy, cfg); err != nil {
+			return err
+		}
+	} else {
+		if !eglHasExtension(dpy, "EGL_KHR_no_config_context") ||
+			!eglHasExtension(dpy, "EGL_KHR_surfaceless_context") {
+			return fmt.Errorf("gpu: no usable config (%v) and no surfaceless context support", cfgErr)
+		}
+		if b.ctx, err = eglCreateContext(dpy, eglNoConfig); err != nil {
+			return err
+		}
+		b.surface = eglNoSurface
 	}
 	if err = eglMakeCurrent(dpy, b.surface, b.surface, b.ctx); err != nil {
 		return err
 	}
+	b.renderer = glString(C.GL_RENDERER)
+	b.vendor = glString(C.GL_VENDOR)
 	stepFS, drawFS, ok := effectShaders(b.effect)
 	if !ok {
 		return fmt.Errorf("gpu: no shader for effect %q", b.effect)
@@ -246,6 +321,9 @@ func (b *gpuBackend) uploadFullscreenTriangle() error {
 func (b *gpuBackend) Resize(w, h int) error {
 	glMu.Lock()
 	defer glMu.Unlock()
+	if err := b.makeCurrent(); err != nil {
+		return err
+	}
 	return b.resize(w, h)
 }
 
@@ -326,6 +404,9 @@ func (b *gpuBackend) Step() error {
 func (b *gpuBackend) Draw(pixels []byte, stride int) error {
 	glMu.Lock()
 	defer glMu.Unlock()
+	if err := b.makeCurrent(); err != nil {
+		return err
+	}
 
 	if b.ticks == 0 {
 		b.ticks = 1
@@ -373,6 +454,16 @@ func (b *gpuBackend) Draw(pixels []byte, stride int) error {
 // flipped here rather than in each effect's maths.
 func (b *gpuBackend) readback(pixels []byte, stride int) error {
 	rowBytes := b.w * 4
+	if stride == rowBytes && len(pixels) >= rowBytes*b.h {
+		if len(b.scratch) != rowBytes {
+			b.scratch = make([]byte, rowBytes)
+		}
+		C.glReadPixels(0, 0, C.GLsizei(b.w), C.GLsizei(b.h),
+			C.GL_RGBA, C.GL_UNSIGNED_BYTE, unsafe.Pointer(&pixels[0]))
+		flipRGBAToBGRA(pixels[:rowBytes*b.h], b.scratch)
+		return glErr("readback")
+	}
+	// Padded or partial caller buffers retain the full-frame fallback.
 	if want := rowBytes * b.h; len(b.scratch) < want {
 		b.scratch = make([]byte, want)
 	}
@@ -399,6 +490,19 @@ func (b *gpuBackend) readback(pixels []byte, stride int) error {
 	return glErr("readback")
 }
 
+// flipRGBAToBGRA converts tightly packed GL rows in place with one spare row.
+func flipRGBAToBGRA(pixels, row []byte) {
+	stride := len(row)
+	for top, bottom := 0, len(pixels)-stride; top < bottom; top, bottom = top+stride, bottom-stride {
+		copy(row, pixels[top:top+stride])
+		copy(pixels[top:top+stride], pixels[bottom:bottom+stride])
+		copy(pixels[bottom:bottom+stride], row)
+	}
+	for i := 0; i < len(pixels); i += 4 {
+		pixels[i], pixels[i+2], pixels[i+3] = pixels[i+2], pixels[i], 0xff
+	}
+}
+
 func (b *gpuBackend) Close() error {
 	glMu.Lock()
 	defer glMu.Unlock()
@@ -409,6 +513,9 @@ func (b *gpuBackend) Close() error {
 func (b *gpuBackend) glErrors() int {
 	glMu.Lock()
 	defer glMu.Unlock()
+	if b.makeCurrent() != nil {
+		return -1
+	}
 	n := 0
 	for C.glGetError() != C.GL_NO_ERROR {
 		n++
@@ -422,12 +529,22 @@ func (b *gpuBackend) glErrors() int {
 func (b *gpuBackend) paintSolid(rgba [4]float32, dst []byte, stride int) error {
 	glMu.Lock()
 	defer glMu.Unlock()
+	if err := b.makeCurrent(); err != nil {
+		return err
+	}
 	C.glBindFramebuffer(C.GL_FRAMEBUFFER, b.fbo)
 	C.glViewport(0, 0, C.GLsizei(b.w), C.GLsizei(b.h))
 	C.glClearColor(C.GLfloat(rgba[0]), C.GLfloat(rgba[1]), C.GLfloat(rgba[2]), C.GLfloat(rgba[3]))
 	C.glClear(C.GL_COLOR_BUFFER_BIT)
 	C.glFinish()
 	return b.readback(dst, stride)
+}
+
+func (b *gpuBackend) makeCurrent() error {
+	if b.closed {
+		return fmt.Errorf("gpu: backend closed")
+	}
+	return eglMakeCurrent(b.display, b.surface, b.surface, b.ctx)
 }
 
 // close assumes glMu is already held, so construction failure paths can reuse it.
@@ -437,37 +554,44 @@ func (b *gpuBackend) close() error {
 	}
 	b.closed = true
 	if b.display != eglNone {
+		if b.ctx != eglNoContext && eglMakeCurrent(b.display, b.surface, b.surface, b.ctx) == nil {
+			if b.fbo != 0 {
+				C.glDeleteFramebuffers(1, &b.fbo)
+			}
+			if b.tex != 0 {
+				C.glDeleteTextures(1, &b.tex)
+			}
+			for i := 0; i < 2; i++ {
+				if b.sfbo[i] != 0 {
+					C.glDeleteFramebuffers(1, &b.sfbo[i])
+				}
+				if b.stex[i] != 0 {
+					C.glDeleteTextures(1, &b.stex[i])
+				}
+			}
+			if b.vbo != 0 {
+				C.glDeleteBuffers(1, &b.vbo)
+			}
+			if b.stepProg != 0 {
+				C.glDeleteProgram(b.stepProg)
+			}
+			if b.drawProg != 0 {
+				C.glDeleteProgram(b.drawProg)
+			}
+		}
 		C.eglMakeCurrent(b.display, eglNoSurface, eglNoSurface, eglNoContext)
-		if b.fbo != 0 {
-			C.glDeleteFramebuffers(1, &b.fbo)
-		}
-		if b.tex != 0 {
-			C.glDeleteTextures(1, &b.tex)
-		}
-		for i := 0; i < 2; i++ {
-			if b.sfbo[i] != 0 {
-				C.glDeleteFramebuffers(1, &b.sfbo[i])
-			}
-			if b.stex[i] != 0 {
-				C.glDeleteTextures(1, &b.stex[i])
-			}
-		}
-		if b.vbo != 0 {
-			C.glDeleteBuffers(1, &b.vbo)
-		}
-		if b.stepProg != 0 {
-			C.glDeleteProgram(b.stepProg)
-		}
-		if b.drawProg != 0 {
-			C.glDeleteProgram(b.drawProg)
-		}
 		if b.ctx != eglNoContext {
 			C.eglDestroyContext(b.display, b.ctx)
 		}
 		if b.surface != eglNoSurface {
 			C.eglDestroySurface(b.display, b.surface)
 		}
-		C.eglTerminate(b.display)
+		eglUsers[b.display]--
+		if eglUsers[b.display] == 0 {
+			C.eglTerminate(b.display)
+			delete(eglUsers, b.display)
+		}
+		C.gpu_gbm_close(b.gbm)
 	}
 	if b.threaded {
 		runtime.UnlockOSThread()
@@ -478,33 +602,60 @@ func (b *gpuBackend) close() error {
 
 // --- EGL setup -----------------------------------------------------------
 
-func eglOpenDisplay() (C.EGLDisplay, error) {
-	// Mesa advertises surfaceless rendering as a client-side platform extension,
-	// visible through a NULL-display query. NVIDIA's EGL does not, which is why
-	// the default-display path below has to stay.
+// eglOpenDisplay picks the EGL display in order of how much hardware it
+// reaches: the GBM platform of the render node first, the surfaceless platform
+// second (Mesa resolves it to the software rasterizer), and the default
+// display last (surfaceless is a client-side extension that NVIDIA's EGL does
+// not advertise, so the legacy path stays). The platform name rides along for
+// the diagnostics line.
+func eglOpenDisplay(gbm *C.struct_gpu_gbm) (C.EGLDisplay, string, error) {
+	if d := C.gpu_gbm_display(gbm); d != eglNone {
+		if eglInitialize(d) == nil {
+			return d, "gbm", nil
+		}
+		C.eglTerminate(d)
+		C.gpu_gbm_close(gbm)
+	}
 	if eglHasExtension(eglNone, "EGL_MESA_platform_surfaceless") {
 		if d := C.gpu_surfaceless_display(); d != eglNone {
 			if eglInitialize(d) == nil {
-				return d, nil
+				return d, "surfaceless", nil
 			}
 			C.eglTerminate(d)
 		}
 	}
 	d := C.gpu_default_display()
 	if d == eglNone {
-		return eglNone, fmt.Errorf("gpu: no EGL display")
+		return eglNone, "", fmt.Errorf("gpu: no EGL display")
 	}
 	if err := eglInitialize(d); err != nil {
-		return eglNone, err
+		return eglNone, "", err
 	}
-	return d, nil
+	return d, "default", nil
 }
 
+// glString reads one GL string (GL_RENDERER, GL_VENDOR) as Go.
+func glString(name C.GLenum) string {
+	p := C.glGetString(name)
+	if p == nil {
+		return ""
+	}
+	return C.GoString((*C.char)(unsafe.Pointer(p)))
+}
+
+// eglUsers is protected by glMu; surfaceless/default can share a display.
+var eglUsers = make(map[C.EGLDisplay]int)
+
 func eglInitialize(d C.EGLDisplay) error {
+	if eglUsers[d] > 0 {
+		eglUsers[d]++
+		return nil
+	}
 	major, minor := C.EGLint(0), C.EGLint(0)
 	if C.eglInitialize(d, &major, &minor) != C.EGL_TRUE {
 		return fmt.Errorf("gpu: eglInitialize failed (EGL error 0x%x)", eglErr())
 	}
+	eglUsers[d] = 1
 	return nil
 }
 
