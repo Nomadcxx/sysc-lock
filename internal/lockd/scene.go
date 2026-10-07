@@ -8,20 +8,21 @@ import (
 )
 
 // Scene is the pixel layout of the lock screen for one output: a centred
-// stack of wordmark, clock, date and the on-demand entry with its indicator
-// and status lines. Later sub-projects add rows to this stack; nothing here is
-// a widget toolkit.
+// stack of SYSC header, title rule, clock, date and the on-demand entry with
+// its indicator and status lines. Later sub-projects add rows to this stack;
+// nothing here is a widget toolkit.
 type Scene struct {
-	Scale    float64
-	Cell     int // clock cell width in pixels; also the jolt step
-	Wordmark []string
-	WordCW   int // 0 when the wordmark does not fit
-	WordAt   image.Point
-	Clock    []string
-	ClockCW  int // 0: the plain style draws text inside ClockBox
-	ClockBox image.Rectangle
-	Date     image.Rectangle
-	DateSize int
+	Scale float64
+	Cell  int // clock cell width in pixels; also the jolt step
+	// Logo is the SYSC wordmark header (greet asset) and Title the rule line
+	// that frames the stack. Both drop before Help when the stack does not
+	// fit; the ambient row drops first.
+	Logo, Title image.Rectangle
+	Clock       []string
+	ClockCW     int // 0: the plain style draws text inside ClockBox
+	ClockBox    image.Rectangle
+	Date        image.Rectangle
+	DateSize    int
 	// Entry, Indicators and Status are laid out even while the entry is hidden,
 	// so revealing it never moves anything.
 	Entry, Indicators, Status image.Rectangle
@@ -29,9 +30,10 @@ type Scene struct {
 	// Menu is the Power Options popup, centred over the stack, and Help is the
 	// bottom hint strip. Both are laid out whether or not they are drawn, so
 	// opening the popup never moves anything. Menu is empty only when the
-	// output is too small for it; Help is dropped, like the wordmark, when the
+	// output is too small for it; Help, Title and Logo are dropped when the
 	// stack would not fit. Ambient is the one-line status row under Status; it
-	// drops first when the stack would not fit, then Help, then the wordmark.
+	// drops first when the stack would not fit, then Help, then Title, then
+	// Logo.
 	Menu    image.Rectangle
 	Help    image.Rectangle
 	Ambient image.Rectangle
@@ -39,21 +41,24 @@ type Scene struct {
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
-	wm := image.Rectangle{Min: s.WordAt, Max: s.WordAt.Add(image.Pt(art.Width(s.Wordmark)*s.WordCW, len(s.Wordmark)*2*s.WordCW))}
-	return wm.Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient)
+	return s.Logo.Union(s.Title).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
 // function of its arguments. The style steps down to a narrower one, then to
 // plain, rather than overflow; the ambient row drops first when the output is
-// too short, then the hint strip, then the wordmark.
+// too short, then the hint strip, then the title rule, then the logo.
 func Layout(width, height int, scale float64, styleName, clockText string) Scene {
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
 	}
 	scale = min(scale, 4)
 	px := func(n int) int { return max(1, int(float64(n)*scale)) }
+	margin := px(8)
 	style, rows, cw := art.Pick(styleName, clockText, width, height)
+	if !style.Plain() {
+		cw = max(art.MinCell, cw*3/4) // greet clock: centered and smaller
+	}
 	s := Scene{Scale: scale, Clock: rows, ClockCW: cw}
 	clockH, clockW, unit := len(rows)*2*cw, art.Width(rows)*cw, cw
 	if style.Plain() {
@@ -62,24 +67,28 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 		unit = max(px(8), height/60)
 	}
 	s.Cell = max(unit, px(6))
-	wm := art.Wordmark()
-	wcw := min(max(art.MinCell, unit/2), width*9/10/max(1, art.Width(wm)))
-	wmH := len(wm) * 2 * wcw
-	if wcw < art.MinCell {
-		wm, wmH, wcw = nil, 0, 0
+	logoW := min(width*9/10, max(1, width-2*margin))
+	logoH := logoW * art.LogoH / art.LogoW
+	if capH := max(1, height/5); logoH > capH {
+		logoH = capH
+		logoW = logoH * art.LogoW / art.LogoH
 	}
+	if logoH < px(16) || logoW < px(64) {
+		logoH, logoW = 0, 0
+	}
+	titleH := max(px(22), unit*2)
+	titleW := min(width*9/10, max(1, width-2*margin))
 	gap := 2 * unit
 	dateSize := max(px(24), unit*3/2)
 	dateH := dateSize * 3 / 2
 	entryH := max(px(40), unit*3)
 	lineH := px(22)
-	margin := px(8)
 	helpH := lineH + unit // gap above the strip plus the strip itself
 	ambientH := lineH
 	total := func() int {
-		t := clockH + gap + dateH + 2*gap + entryH + 2*lineH + ambientH + helpH
-		if wmH > 0 {
-			t += wmH + gap
+		t := titleH + gap + clockH + gap + dateH + 2*gap + entryH + 2*lineH + ambientH + helpH
+		if logoH > 0 {
+			t += logoH + gap
 		}
 		return t
 	}
@@ -87,16 +96,23 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 		ambientH = 0 // the ambient row drops before anything else
 	}
 	if total() > height-2*margin && helpH > 0 {
-		helpH = 0 // greet chrome drops before the wordmark
+		helpH = 0 // greet chrome drops before the header
 	}
-	if total() > height-2*margin && wmH > 0 {
-		wm, wmH, wcw = nil, 0, 0
+	if total() > height-2*margin && logoH > 0 {
+		logoH, logoW = 0, 0 // the rule line survives longer than the logo
+	}
+	if total() > height-2*margin && titleH > 0 {
+		titleH = 0
 	}
 	y := max(margin, (height-total())*2/5)
-	s.Wordmark, s.WordCW = wm, wcw
-	if wmH > 0 {
-		s.WordAt = image.Pt((width-art.Width(wm)*wcw)/2, y)
-		y += wmH + gap
+	if logoH > 0 {
+		s.Logo = image.Rect((width-logoW)/2, y, (width+logoW)/2, y+logoH)
+		y += logoH + gap
+	}
+	if titleH > 0 {
+		tx := (width - titleW) / 2
+		s.Title = image.Rect(tx, y, tx+titleW, y+titleH)
+		y += titleH + gap
 	}
 	s.ClockBox = image.Rect((width-clockW)/2, y, (width+clockW)/2, y+clockH)
 	y += clockH + gap

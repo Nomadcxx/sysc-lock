@@ -12,11 +12,17 @@ import (
 	"syscall"
 
 	"image/color"
+
+	"github.com/Nomadcxx/sysc-Go/animations"
 )
 
-// Palette carries the roles sysc-lock renders with.
+// Palette carries the roles sysc-lock renders with. Ground/Banner/Accent/
+// ClockInk/DateInk drive the greeter chrome and are overlaid from the same
+// animations theme the background effects use (WithScheme); Surface and the
+// rest keep the shell palette file as fallback.
 type Palette struct {
-	Surface, OnSurface, Error, Primary color.NRGBA
+	Surface, OnSurface, Error, Primary        color.NRGBA
+	Ground, Banner, Accent, ClockInk, DateInk color.NRGBA
 }
 
 var hexRe = regexp.MustCompile(`^#([0-9a-fA-F]{6})$`)
@@ -51,7 +57,9 @@ func hexVal(b byte) byte {
 	return 0xFF
 }
 
-// Default returns the built-in dark fallback palette.
+// Default returns the built-in dark fallback palette. Chrome roles stay
+// unset; the view falls back to its fixed ink floor until WithScheme loads
+// the user's theme.
 func Default() Palette {
 	return Palette{
 		Surface:   color.NRGBA{R: 0x10, G: 0x10, B: 0x14, A: 0xFF},
@@ -59,6 +67,33 @@ func Default() Palette {
 		Error:     color.NRGBA{R: 0xF2, G: 0xB8, B: 0xB5, A: 0xFF},
 		Primary:   color.NRGBA{R: 0xB4, G: 0xC5, B: 0xFF, A: 0xFF},
 	}
+}
+
+// WithScheme overlays the animations screensaver palette
+// [background, ascii_primary, ascii_secondary, clock_primary, clock_secondary,
+// date_color] so chrome and effects share one theme. Unknown names or bad
+// colors keep the current palette.
+func (p Palette) WithScheme(name string) Palette {
+	stops := animations.GetScreensaverPalette(name)
+	if len(stops) < 6 {
+		return p
+	}
+	if c, ok := parseHex(stops[0]); ok {
+		p.Surface, p.Ground = c, c
+	}
+	if c, ok := parseHex(stops[1]); ok {
+		p.Banner = c
+	}
+	if c, ok := parseHex(stops[2]); ok {
+		p.Accent = c
+	}
+	if c, ok := parseHex(stops[3]); ok {
+		p.ClockInk = c
+	}
+	if c, ok := parseHex(stops[5]); ok {
+		p.DateInk = c
+	}
+	return p
 }
 
 // Load reads the palette file at path. Absent or unparsable files return

@@ -8,15 +8,17 @@ import (
 	"strings"
 	"time"
 
+	xdraw "golang.org/x/image/draw"
+
 	"github.com/Nomadcxx/sysc-lock/internal/art"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
 )
 
-// View composes the lock screen over the background: wordmark, block-digit
-// clock, date, and an entry that appears when a key reveals it. Errors keep the
-// 4s auto-clear; terminal PAM errors persist.
+// View composes the lock screen over the background: SYSC header, greet-style
+// title rule, block-digit clock, date, and an entry that appears when a key
+// reveals it. Errors keep the 4s auto-clear; terminal PAM errors persist.
 type View struct {
 	Pal        theme.Palette
 	User, Host string
@@ -167,16 +169,15 @@ func border(fb *render.Framebuffer, r image.Rectangle, c color.NRGBA, n int) {
 	fillRect(fb, image.Rect(r.Max.X-n, r.Min.Y, r.Max.X, r.Max.Y), c)
 }
 
-// printLimits reports how many wordmark and clock cells the print reveal has
-// drawn at now (-1: all). done is true once the reveal has finished or motion
-// is reduced; the date appears then.
-func (v *View) printLimits(now time.Time, s Scene) (word, clock int, done bool) {
+// printLimits reports how many clock cells the print reveal has drawn at now
+// (-1: all). done is true once the reveal has finished or motion is reduced;
+// the date appears then. The header and rule show immediately.
+func (v *View) printLimits(now time.Time, s Scene) (clock int, done bool) {
 	if v.Reduced || now.Sub(v.printStart) >= art.PrintDuration {
-		return -1, -1, true
+		return -1, true
 	}
-	wt := art.Total(s.Wordmark)
-	n := art.PrintLimit(now.Sub(v.printStart), wt+art.Total(s.Clock))
-	return min(n, wt), max(0, n-wt), false
+	n := art.PrintLimit(now.Sub(v.printStart), art.Total(s.Clock))
+	return min(n, art.Total(s.Clock)), false
 }
 
 func (v *View) textPx(n int, box image.Rectangle) int {
@@ -194,20 +195,19 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	}
 	text := v.clockText(now)
 	s := Layout(fb.Width, fb.Height, v.Scale, v.StyleName, text)
-	wordLimit, clockLimit, done := v.printLimits(now, s)
-	for _, r := range art.Rects(s.Wordmark, s.WordAt, s.WordCW, 2*s.WordCW, wordLimit) {
-		fillRect(fb, r, panelInk)
-	}
+	clockLimit, done := v.printLimits(now, s)
+	v.drawLogo(fb, s.Logo, v.banner())
+	v.drawTitle(fb, s.Title)
 	if s.ClockCW > 0 {
 		for _, r := range art.Rects(s.Clock, s.ClockBox.Min, s.ClockCW, 2*s.ClockCW, clockLimit) {
-			fillRect(fb, r, panelInk)
+			fillRect(fb, r, v.clockInk())
 		}
 	} else if clockLimit != 0 {
 		size := max(1, s.ClockBox.Dy()*7/10)
-		drawTextBox(fb, s.ClockBox, s.ClockBox.Min.Y+s.ClockBox.Dy()*4/5, text, size, panelInk)
+		drawTextBox(fb, s.ClockBox, s.ClockBox.Min.Y+s.ClockBox.Dy()*4/5, text, size, v.clockInk())
 	}
 	if done {
-		drawTextBox(fb, s.Date, s.Date.Min.Y+s.DateSize, strings.ToUpper(now.Format("Monday, January 2")), v.textPx(s.DateSize, s.Date), panelInk)
+		drawTextBox(fb, s.Date, s.Date.Min.Y+s.DateSize, strings.ToUpper(now.Format("Monday, January 2")), v.textPx(s.DateSize, s.Date), v.dateInk())
 	}
 	visible := v.EntryVisible(now)
 	status := v.StatusLine(now)
@@ -216,7 +216,7 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	}
 	dx := art.Jolt(now.Sub(v.joltStart)) * s.Cell
 	shift := func(r image.Rectangle) image.Rectangle { return r.Add(image.Pt(dx, 0)) }
-	fillRect(fb, shift(s.Backing), panelGround)
+	fillRect(fb, shift(s.Backing), v.ground())
 	if visible {
 		v.drawEntry(fb, shift(s.Entry), shift(s.Indicators), s.Scale)
 	}
@@ -235,8 +235,9 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	}
 }
 
+// drawEntry draws the entry field. Greet minimal style: no frame line; the
+// title rule above frames the stack instead.
 func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectangle, scale float64) {
-	border(fb, entry, panelAccent, max(2, int(2*scale)))
 	inner := entry.Inset(max(2, int(8*scale)))
 	if v.Entry == nil || len(v.Entry.Pass) == 0 {
 		drawTextBox(fb, inner, entry.Min.Y+entry.Dy()*2/3, "PASSWORD", v.textPx(entry.Dy()/2, inner), panelInk)
@@ -269,7 +270,7 @@ func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
 	if s.Help.Empty() {
 		return
 	}
-	fillRect(fb, s.Help, panelGround)
+	fillRect(fb, s.Help, v.ground())
 	if v.Hint == "" {
 		return
 	}
@@ -281,7 +282,7 @@ func (v *View) drawAmbient(fb *render.Framebuffer, s Scene) {
 	if s.Ambient.Empty() || v.Ambient == "" {
 		return
 	}
-	fillRect(fb, s.Ambient, panelGround)
+	fillRect(fb, s.Ambient, v.ground())
 	box := s.Ambient.Inset(max(1, s.Ambient.Dy()/6))
 	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Ambient, v.textPx(14, box), panelMuted)
 }
@@ -291,7 +292,7 @@ func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p PowerView) {
 	if box.Empty() {
 		return
 	}
-	fillRect(fb, box, panelGround)
+	fillRect(fb, box, v.ground())
 	n := max(1, int(v.Scale))
 	border(fb, box, panelDanger, n)
 	lineH := max(n*3, box.Dy()/8)
@@ -312,7 +313,7 @@ func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p PowerView) {
 		ink := panelMuted
 		if row.Selected {
 			fillRect(fb, r, panelDanger)
-			ink = panelGround
+			ink = v.ground()
 		}
 		drawTextBox(fb, r.Inset(px/2), y+lineH*3/5, row.Title, px, ink)
 		y += lineH
@@ -337,6 +338,57 @@ func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p PowerView) {
 		drawTextBox(fb, inner, y+lineH/2, p.Help, v.textPx(12, inner), panelMuted)
 	}
 }
+
+// drawTitle renders the greet-style rule line that frames the stack.
+func (v *View) drawTitle(fb *render.Framebuffer, r image.Rectangle) {
+	if r.Empty() {
+		return
+	}
+	drawTextBox(fb, r, r.Min.Y+r.Dy()*3/4, "────///////LOCKED///////────", v.textPx(r.Dy()*3/5, r), v.banner())
+}
+
+// drawLogo paints the SYSC wordmark tinted with the banner ink: the asset is
+// white on transparent, so its alpha is the mix factor.
+func (v *View) drawLogo(fb *render.Framebuffer, r image.Rectangle, tint color.NRGBA) {
+	src := art.Logo()
+	if src == nil || r.Empty() {
+		return
+	}
+	w, h := r.Dx(), r.Dy()
+	if w < 1 || h < 1 {
+		return
+	}
+	scaled := image.NewNRGBA(image.Rect(0, 0, w, h))
+	xdraw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), src, src.Bounds(), xdraw.Over, nil)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			a := uint32(scaled.Pix[scaled.PixOffset(x, y)+3])
+			if a == 0 {
+				continue
+			}
+			dst := color.NRGBAModel.Convert(fb.At(r.Min.X+x, r.Min.Y+y)).(color.NRGBA)
+			fb.Set(r.Min.X+x, r.Min.Y+y, color.NRGBA{
+				R: uint8((uint32(dst.R)*(255-a) + uint32(tint.R)*a) / 255),
+				G: uint8((uint32(dst.G)*(255-a) + uint32(tint.G)*a) / 255),
+				B: uint8((uint32(dst.B)*(255-a) + uint32(tint.B)*a) / 255),
+				A: 0xFF,
+			})
+		}
+	}
+}
+
+// Role inks fall back to the fixed floors when a role is unset (zero palette).
+func role(c, fallback color.NRGBA) color.NRGBA {
+	if c.A == 0 {
+		return fallback
+	}
+	return c
+}
+func (v *View) ground() color.NRGBA   { return role(v.Pal.Ground, panelGround) }
+func (v *View) banner() color.NRGBA   { return role(v.Pal.Banner, panelAccent) }
+func (v *View) accent() color.NRGBA   { return role(v.Pal.Accent, panelAccent) }
+func (v *View) clockInk() color.NRGBA { return role(v.Pal.ClockInk, panelInk) }
+func (v *View) dateInk() color.NRGBA  { return role(v.Pal.DateInk, panelInk) }
 
 func itoa(n int) string { return strconv.Itoa(n) }
 

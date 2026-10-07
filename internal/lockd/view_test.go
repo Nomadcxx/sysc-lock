@@ -110,18 +110,14 @@ func TestSceneFitsEverySize(t *testing.T) {
 			for name, r := range map[string]image.Rectangle{
 				"clock": s.ClockBox, "date": s.Date, "entry": s.Entry,
 				"backing": s.Backing, "status": s.Status, "ambient": s.Ambient,
-				"menu": s.Menu, "help": s.Help,
+				"menu": s.Menu, "help": s.Help, "logo": s.Logo, "title": s.Title,
 			} {
 				if r.Empty() {
-					continue // a dropped row, like the wordmark
+					continue // a dropped row, like the logo or title on tiny outputs
 				}
 				if !r.In(fb) {
 					t.Fatalf("%dx%d %s: %s %v outside output", c.w, c.h, style, name, r)
 				}
-			}
-			wm := image.Rectangle{Min: s.WordAt, Max: s.WordAt.Add(image.Pt(art.Width(s.Wordmark)*s.WordCW, len(s.Wordmark)*2*s.WordCW))}
-			if s.WordCW > 0 && !wm.In(fb) {
-				t.Fatalf("%dx%d %s: wordmark outside output", c.w, c.h, style)
 			}
 			if !(s.ClockBox.Max.Y <= s.Date.Min.Y && s.Date.Max.Y <= s.Entry.Min.Y) {
 				t.Fatalf("%dx%d %s: stack overlaps %+v", c.w, c.h, style, s)
@@ -198,11 +194,11 @@ func TestPrintRevealIsBoundedAndSkippedWhenReduced(t *testing.T) {
 	fb := render.New(960, 720)
 	v.RenderForeground(fb, now)
 	s := Layout(960, 720, 1, "", v.clockText(now))
-	early, _, done := v.printLimits(now.Add(100*time.Millisecond), s)
-	if done || early >= art.Total(s.Wordmark) {
+	early, done := v.printLimits(now.Add(100*time.Millisecond), s)
+	if done || early >= art.Total(s.Clock) {
 		t.Fatal("print reveal should still be running", early)
 	}
-	if _, _, done = v.printLimits(now.Add(art.PrintDuration), s); !done {
+	if _, done = v.printLimits(now.Add(art.PrintDuration), s); !done {
 		t.Fatal("print reveal must end within one second")
 	}
 	if got := v.NextDeadline(now); got.After(now.Add(40 * time.Millisecond)) {
@@ -211,8 +207,8 @@ func TestPrintRevealIsBoundedAndSkippedWhenReduced(t *testing.T) {
 	r := NewView(theme.Default(), "u", "h")
 	r.Reduced = true
 	r.RenderForeground(render.New(960, 720), now)
-	if w, c, done := r.printLimits(now, s); !done || w != -1 || c != -1 {
-		t.Fatal("reduced motion draws the final frame", w, c, done)
+	if c, done := r.printLimits(now, s); !done || c != -1 {
+		t.Fatal("reduced motion draws the final frame", c, done)
 	}
 }
 
@@ -275,8 +271,8 @@ func TestHiddenEntryDrawsNoFieldAndRevealedDoes(t *testing.T) {
 	if px(a, s.Entry.Min) != hidden.Pal.Surface {
 		t.Fatal("hidden entry must leave the background alone")
 	}
-	if px(b, s.Entry.Min) != panelAccent {
-		t.Fatal("revealed entry draws an accent frame")
+	if px(b, s.Entry.Min) != panelGround {
+		t.Fatal("the greet minimal style draws no entry frame")
 	}
 }
 

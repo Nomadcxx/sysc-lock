@@ -1,7 +1,6 @@
 package art
 
 import (
-	_ "embed"
 	"strings"
 )
 
@@ -9,12 +8,6 @@ const (
 	DefaultStyle = "kompaktblk"
 	Plain        = "plain"
 )
-
-//go:embed wordmark.txt
-var wordmark string
-
-// Wordmark returns the sysc-lock wordmark rows.
-func Wordmark() []string { return strings.Split(strings.TrimRight(wordmark, "\n"), "\n") }
 
 // Style is one selectable clock style. plain has no glyph table.
 type Style struct {
