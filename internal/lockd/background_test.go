@@ -258,3 +258,17 @@ func TestBlurBackdropReportsFrozenAndNeverSchedules(t *testing.T) {
 		t.Fatal("missed capture reported", got)
 	}
 }
+
+func TestSelectedEffectOverridesCapturedBackdrop(t *testing.T) {
+	now := time.Now()
+	b := &backgroundWorker{jobs: make(chan backgroundJob, 1), cached: backgroundFrame{width: 2, height: 2, pixels: make([]byte, 16)}}
+	out := &lockOut{w: 2, h: 2, background: b, backdrop: render.New(1, 1), blurW: 2, blurH: 2}
+	c := &Client{effect: "fire", outputs: map[OutputID]*lockOut{1: out}}
+	c.scheduleBackground(out, now)
+	if len(b.jobs) != 1 {
+		t.Fatal("captured backdrop prevented the selected effect from stepping")
+	}
+	if got := c.backgroundStatus(now); got != "animated" {
+		t.Fatal("selected effect reported", got)
+	}
+}

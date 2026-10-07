@@ -49,12 +49,7 @@ func (c *Client) CaptureBlur() {
 }
 
 func (c *Client) captureOutput(out *lockOut) {
-	if out.removed || out.output == nil || out.w < backdropDownsample || out.h < backdropDownsample {
-		return
-	}
-	// transient full frame plus the reduced copy must fit the pixel budget
-	full := out.w * 4 * out.h
-	if 2*full > maxPixelBytes-c.pixelBytes() {
+	if out.removed || out.output == nil {
 		return
 	}
 	frame, err := c.screencopy.CaptureOutput(0, out.output)
@@ -67,7 +62,7 @@ func (c *Client) captureOutput(out *lockOut) {
 		format, width, height, stride                  uint32
 	)
 	frame.SetBufferHandler(func(e screencopy.ZwlrScreencopyFrameV1BufferEvent) {
-		if offered || !captureBufferFits(e.Format, e.Width, e.Height, e.Stride) {
+		if offered || !captureBufferFits(e.Format, e.Width, e.Height, e.Stride, maxPixelBytes-c.pixelBytes()) {
 			return
 		}
 		offered = true
@@ -130,8 +125,16 @@ func (c *Client) pumpUntil(ready func() bool) bool {
 // captureBufferFits reports whether we can allocate a matching shm buffer.
 // Feeding Copy a mismatched buffer is a protocol error, so declined
 // offers simply fall through to the plain backdrop.
-func captureBufferFits(format, width, height, stride uint32) bool {
-	if stride != width*4 || width == 0 || height == 0 {
+func captureBufferFits(format, width, height, stride uint32, remaining int) bool {
+	size, err := bufferBytes(int(width), int(height))
+	if err != nil || size > maxCaptureBytes || stride != width*4 {
+		return false
+	}
+	// The offer supplies dimensions before any lock surface is configured.
+	// Budget shm + normalization + reduced backdrop + blur scratch lines.
+	rw := (int(width) + backdropDownsample - 1) / backdropDownsample
+	rh := (int(height) + backdropDownsample - 1) / backdropDownsample
+	if 2*size+rw*rh*4+3*(rw+rh)*4 > remaining {
 		return false
 	}
 	switch format {
