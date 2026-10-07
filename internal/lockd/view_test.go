@@ -110,7 +110,8 @@ func TestSceneFitsEverySize(t *testing.T) {
 			for name, r := range map[string]image.Rectangle{
 				"clock": s.ClockBox, "date": s.Date, "entry": s.Entry,
 				"backing": s.Backing, "status": s.Status, "ambient": s.Ambient,
-				"menu": s.Menu, "help": s.Help, "logo": s.Logo, "title": s.Title,
+				"menu": s.Menu, "help": s.Help, "logo": s.Logo,
+				"frame": s.Frame, "rule": s.Rule,
 			} {
 				if r.Empty() {
 					continue // a dropped row, like the logo or title on tiny outputs
@@ -245,8 +246,8 @@ func TestStatusShowsWhileEntryHidden(t *testing.T) {
 		t.Fatal("entry must stay hidden until a key reveals it")
 	}
 	got := color.NRGBAModel.Convert(fb.At(s.Backing.Min.X+1, s.Backing.Min.Y+1)).(color.NRGBA)
-	if got != panelGround {
-		t.Fatal("status needs its solid backing even with the entry hidden", got)
+	if got == v.Pal.Surface || got == panelInk {
+		t.Fatal("status needs its frosted backing even with the entry hidden", got)
 	}
 }
 
@@ -265,14 +266,22 @@ func TestHiddenEntryDrawsNoFieldAndRevealedDoes(t *testing.T) {
 	if reflect.DeepEqual(a.Pix, b.Pix) {
 		t.Fatal("revealing the entry must change the frame")
 	}
-	px := func(fb *render.Framebuffer, p image.Point) color.NRGBA {
-		return color.NRGBAModel.Convert(fb.At(p.X, p.Y)).(color.NRGBA)
+	ink := func(fb *render.Framebuffer) int {
+		n := 0
+		for y := s.Entry.Min.Y; y < s.Entry.Max.Y; y++ {
+			for x := s.Entry.Min.X; x < s.Entry.Max.X; x++ {
+				if color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA) == panelInk {
+					n++
+				}
+			}
+		}
+		return n
 	}
-	if px(a, s.Entry.Min) != hidden.Pal.Surface {
-		t.Fatal("hidden entry must leave the background alone")
+	if ink(a) != 0 {
+		t.Fatal("hidden entry must draw no ink inside the field")
 	}
-	if px(b, s.Entry.Min) != panelGround {
-		t.Fatal("the greet minimal style draws no entry frame")
+	if ink(b) == 0 {
+		t.Fatal("the revealed entry must draw its placeholder ink")
 	}
 }
 
@@ -306,7 +315,7 @@ func TestSceneStaysInsideItsBounds(t *testing.T) {
 	}
 }
 
-func TestHiddenEntryPaintsNoAmbientInk(t *testing.T) {
+func TestAmbientShowsWhileEntryHidden(t *testing.T) {
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	v := NewView(theme.Default(), "u", "h")
 	v.Reduced = true
@@ -318,8 +327,8 @@ func TestHiddenEntryPaintsNoAmbientInk(t *testing.T) {
 		t.Skip("no ambient slot")
 	}
 	got := color.NRGBAModel.Convert(fb.At(s.Ambient.Min.X+1, s.Ambient.Min.Y+1)).(color.NRGBA)
-	if got != v.Pal.Surface {
-		t.Fatal("hidden entry must leave ambient undrawn")
+	if got != panelGround {
+		t.Fatal("the status row stays on screen even while the entry is hidden")
 	}
 }
 

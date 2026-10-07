@@ -8,16 +8,18 @@ import (
 )
 
 // Scene is the pixel layout of the lock screen for one output: a centred
-// stack of SYSC header, title rule, clock, date and the on-demand entry with
-// its indicator and status lines. Later sub-projects add rows to this stack;
+// stack of SYSC header, clock, date and the framed form with its entry,
+// indicator and status lines. Later sub-projects add rows to this stack;
 // nothing here is a widget toolkit.
 type Scene struct {
 	Scale float64
 	Cell  int // clock cell width in pixels; also the jolt step
-	// Logo is the SYSC wordmark header (greet asset) and Title the rule line
-	// that frames the stack. Both drop before Help when the stack does not
-	// fit; the ambient row drops first.
-	Logo, Title image.Rectangle
+	// Logo is the SYSC wordmark header (greet asset). Frame is the greet-style
+	// form border and Rule is the LOCKED rule along its top row; the frame
+	// drops to a bare form before Help when the stack does not fit. Both drop
+	// after the ambient row and the hint strip.
+	Logo        image.Rectangle
+	Frame, Rule image.Rectangle
 	Clock       []string
 	ClockCW     int // 0: the plain style draws text inside ClockBox
 	ClockBox    image.Rectangle
@@ -30,10 +32,10 @@ type Scene struct {
 	// Menu is the Power Options popup, centred over the stack, and Help is the
 	// bottom hint strip. Both are laid out whether or not they are drawn, so
 	// opening the popup never moves anything. Menu is empty only when the
-	// output is too small for it; Help, Title and Logo are dropped when the
-	// stack would not fit. Ambient is the one-line status row under Status; it
-	// drops first when the stack would not fit, then Help, then Title, then
-	// Logo.
+	// output is too small for it; Help, Frame and Logo are dropped when the
+	// stack would not fit. Ambient is the one-line status row under the frame;
+	// it drops first when the stack would not fit, then Help, then Logo, then
+	// the frame.
 	Menu    image.Rectangle
 	Help    image.Rectangle
 	Ambient image.Rectangle
@@ -41,13 +43,13 @@ type Scene struct {
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
-	return s.Logo.Union(s.Title).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient)
+	return s.Logo.Union(s.Frame).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
 // function of its arguments. The style steps down to a narrower one, then to
 // plain, rather than overflow; the ambient row drops first when the output is
-// too short, then the hint strip, then the title rule, then the logo.
+// too short, then the hint strip, then the logo, then the frame.
 func Layout(width, height int, scale float64, styleName, clockText string) Scene {
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
@@ -76,8 +78,6 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	if logoH < px(16) || logoW < px(64) {
 		logoH, logoW = 0, 0
 	}
-	titleH := max(px(22), unit*2)
-	titleW := min(width*9/10, max(1, width-2*margin))
 	gap := 2 * unit
 	dateSize := max(px(24), unit*3/2)
 	dateH := dateSize * 3 / 2
@@ -85,8 +85,14 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 	lineH := px(22)
 	helpH := lineH + unit // gap above the strip plus the strip itself
 	ambientH := lineH
+	entryW := min(max(1, width-2*px(16)), max(px(260), clockW/2))
+	x := (width - entryW) / 2
+	padX := min(px(14), max(0, x-margin)) // greet form padding, clamped to the margin
+	padY := px(10)
+	innerGap := px(8) // between the rule line and the field
+	ruleH := lineH    // the framed form's title rule row
 	total := func() int {
-		t := titleH + gap + clockH + gap + dateH + 2*gap + entryH + 2*lineH + ambientH + helpH
+		t := ruleH + innerGap + clockH + gap + dateH + 2*gap + entryH + 2*lineH + 2*padY + ambientH + helpH
 		if logoH > 0 {
 			t += logoH + gap
 		}
@@ -99,36 +105,40 @@ func Layout(width, height int, scale float64, styleName, clockText string) Scene
 		helpH = 0 // greet chrome drops before the header
 	}
 	if total() > height-2*margin && logoH > 0 {
-		logoH, logoW = 0, 0 // the rule line survives longer than the logo
+		logoH, logoW = 0, 0 // the frame survives longer than the logo
 	}
-	if total() > height-2*margin && titleH > 0 {
-		titleH = 0
+	if total() > height-2*margin && ruleH > 0 {
+		// The form drops its frame before it drops the field itself.
+		ruleH, innerGap, padX, padY = 0, 0, 0, 0
 	}
 	y := max(margin, (height-total())*2/5)
 	if logoH > 0 {
 		s.Logo = image.Rect((width-logoW)/2, y, (width+logoW)/2, y+logoH)
 		y += logoH + gap
 	}
-	if titleH > 0 {
-		tx := (width - titleW) / 2
-		s.Title = image.Rect(tx, y, tx+titleW, y+titleH)
-		y += titleH + gap
-	}
 	s.ClockBox = image.Rect((width-clockW)/2, y, (width+clockW)/2, y+clockH)
 	y += clockH + gap
 	s.Date = image.Rect(0, y, width, y+dateH)
 	s.DateSize = dateSize
 	y += dateH + 2*gap
-	entryW := min(max(1, width-2*px(16)), max(px(260), clockW/2))
-	x := (width - entryW) / 2
+	if ruleH > 0 {
+		s.Rule = image.Rect(x, y, x+entryW, y+ruleH)
+		y += ruleH + innerGap
+	}
 	s.Entry = image.Rect(x, y, x+entryW, y+entryH)
 	y += entryH
 	s.Indicators = image.Rect(x, y, x+entryW, y+lineH)
 	s.Status = image.Rect(x, y+lineH, x+entryW, y+2*lineH)
-	pad := px(6)
-	s.Backing = image.Rect(x-pad, s.Entry.Min.Y-pad, x+entryW+pad, s.Status.Max.Y)
+	s.Backing = image.Rect(x, s.Entry.Min.Y, x+entryW, s.Status.Max.Y)
+	if ruleH > 0 {
+		s.Backing = image.Rect(x, s.Rule.Min.Y, x+entryW, s.Status.Max.Y)
+	}
+	if padX > 0 || padY > 0 {
+		s.Frame = image.Rect(x-padX, s.Backing.Min.Y-padY, x+entryW+padX, s.Status.Max.Y+padY)
+	}
 	if ambientH > 0 {
-		s.Ambient = image.Rect(x, y+2*lineH, x+entryW, y+3*lineH)
+		ambY := s.Status.Max.Y + padY + px(6)
+		s.Ambient = image.Rect(x, ambY, x+entryW, ambY+lineH)
 	}
 	if helpH > 0 {
 		// Greet chrome: the hint sits on the output, not in the clock stack.

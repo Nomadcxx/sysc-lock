@@ -16,9 +16,10 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
 )
 
-// View composes the lock screen over the background: SYSC header, greet-style
-// title rule, block-digit clock, date, and an entry that appears when a key
-// reveals it. Errors keep the 4s auto-clear; terminal PAM errors persist.
+// View composes the lock screen over the background: SYSC header, a greet-style
+// framed form with the LOCKED rule and frosted glass, the block-digit clock,
+// date, and an entry that appears when a key reveals it. Errors keep the 4s
+// auto-clear; terminal PAM errors persist.
 type View struct {
 	Pal        theme.Palette
 	User, Host string
@@ -197,7 +198,6 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	s := Layout(fb.Width, fb.Height, v.Scale, v.StyleName, text)
 	clockLimit, done := v.printLimits(now, s)
 	v.drawLogo(fb, s.Logo, v.banner())
-	v.drawTitle(fb, s.Title)
 	if s.ClockCW > 0 {
 		for _, r := range art.Rects(s.Clock, s.ClockBox.Min, s.ClockCW, 2*s.ClockCW, clockLimit) {
 			fillRect(fb, r, v.clockInk())
@@ -211,32 +211,30 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	}
 	visible := v.EntryVisible(now)
 	status := v.StatusLine(now)
-	if !visible && status == "" {
-		return
-	}
 	dx := art.Jolt(now.Sub(v.joltStart)) * s.Cell
 	shift := func(r image.Rectangle) image.Rectangle { return r.Add(image.Pt(dx, 0)) }
-	fillRect(fb, shift(s.Backing), v.ground())
+	v.drawForm(fb, shift(s.Frame), shift(s.Backing), shift(s.Rule), s.Scale)
 	if visible {
 		v.drawEntry(fb, shift(s.Entry), shift(s.Indicators), s.Scale)
 	}
-	ink := panelDanger
-	if v.Busy {
-		ink = panelInk
+	if status != "" {
+		ink := panelDanger
+		if v.Busy {
+			ink = panelInk
+		}
+		line := shift(s.Status)
+		drawTextBox(fb, line, line.Min.Y+line.Dy()*3/4, status, v.textPx(line.Dy()*3/5, line), ink)
 	}
-	line := shift(s.Status)
-	drawTextBox(fb, line, line.Min.Y+line.Dy()*3/4, status, v.textPx(line.Dy()*3/5, line), ink)
-	if visible {
-		v.drawAmbient(fb, s)
-		v.drawHint(fb, s)
-	}
+	// The guidance and status rows stay on screen at all times, greet-style.
+	v.drawAmbient(fb, s)
+	v.drawHint(fb, s)
 	if v.Power != nil && v.Power.Open {
 		v.drawPopup(fb, s, *v.Power)
 	}
 }
 
-// drawEntry draws the entry field. Greet minimal style: no frame line; the
-// title rule above frames the stack instead.
+// drawEntry draws the entry field inside the framed form, which owns the
+// border and the frost; the field itself stays frameless (greet minimal style).
 func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectangle, scale float64) {
 	inner := entry.Inset(max(2, int(8*scale)))
 	if v.Entry == nil || len(v.Entry.Pass) == 0 {
@@ -339,12 +337,55 @@ func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p PowerView) {
 	}
 }
 
-// drawTitle renders the greet-style rule line that frames the stack.
-func (v *View) drawTitle(fb *render.Framebuffer, r image.Rectangle) {
+// drawForm renders the greet-style framed form: theme-primary border, the
+// LOCKED rule along the top row, and frosted blurred pixels inside.
+func (v *View) drawForm(fb *render.Framebuffer, frame, backing, rule image.Rectangle, scale float64) {
+	v.frost(fb, backing)
+	if frame.Empty() {
+		return
+	}
+	border(fb, frame, v.banner(), max(2, int(2*scale)))
+	if !rule.Empty() {
+		drawTextBox(fb, rule, rule.Min.Y+rule.Dy()*3/4, "────///////LOCKED///////────", v.textPx(rule.Dy()*3/5, rule), v.banner())
+	}
+}
+
+// frost blurs the pixels already in fb inside r and blends them with the
+// ground, so the form reads as frosted glass over the effect or the desktop.
+// The background is dimmed before this runs, so the mixture keeps ink inside
+// the form above the 4.5:1 floor.
+func (v *View) frost(fb *render.Framebuffer, r image.Rectangle) {
+	r = r.Intersect(fb.Bounds())
 	if r.Empty() {
 		return
 	}
-	drawTextBox(fb, r, r.Min.Y+r.Dy()*3/4, "────///////LOCKED///////────", v.textPx(r.Dy()*3/5, r), v.banner())
+	if r.Dx() < 8 || r.Dy() < 8 {
+		fillRect(fb, r, v.ground())
+		return
+	}
+	sub := &render.Framebuffer{
+		Width: r.Dx(), Height: r.Dy(), Stride: fb.Stride,
+		Pix: fb.Pix[r.Min.Y*fb.Stride+r.Min.X*4:],
+	}
+	blur := render.Blur(sub, 6, 18)
+	if blur == nil {
+		fillRect(fb, r, v.ground())
+		return
+	}
+	g := v.ground()
+	for y := 0; y < r.Dy(); y++ {
+		sy := min(blur.Height-1, y*blur.Height/r.Dy())
+		for x := 0; x < r.Dx(); x++ {
+			sx := min(blur.Width-1, x*blur.Width/r.Dx())
+			i := sy*blur.Stride + sx*4
+			fb.Set(r.Min.X+x, r.Min.Y+y, color.NRGBA{
+				R: uint8((int(blur.Pix[i]) + int(g.R)) / 2),
+				G: uint8((int(blur.Pix[i+1]) + int(g.G)) / 2),
+				B: uint8((int(blur.Pix[i+2]) + int(g.B)) / 2),
+				A: 0xFF,
+			})
+		}
+	}
 }
 
 // drawLogo paints the SYSC wordmark tinted with the banner ink: the asset is
