@@ -133,3 +133,35 @@ func TestUpscaleBackdropNearestNeighbour(t *testing.T) {
 		t.Fatalf("nearest stretch wrong: %v %v %v %v %v", at(0, 0), at(1, 0), at(2, 0), at(3, 3), at(0, 2))
 	}
 }
+
+func TestUpscaleBackdropPreservesOddGeometryPixels(t *testing.T) {
+	for _, shape := range [][4]int{{2, 3, 7, 11}, {5, 7, 1, 2}, {3, 2, 13, 7}} {
+		src := render.New(shape[0], shape[1])
+		for i := range src.Pix {
+			src.Pix[i] = byte(i * 31)
+		}
+		out := &lockOut{w: shape[2], h: shape[3], backdrop: src}
+		dst := make([]byte, out.w*out.h*4)
+		out.upscaleBackdrop(dst)
+		for y := range out.h {
+			for x := range out.w {
+				s := (y*src.Height/out.h)*src.Stride + (x*src.Width/out.w)*4
+				d := (y*out.w + x) * 4
+				for c := range 4 {
+					if dst[d+c] != src.Pix[s+c] {
+						t.Fatalf("shape %v pixel %d,%d channel %d changed", shape, x, y, c)
+					}
+				}
+			}
+		}
+	}
+}
+
+func BenchmarkUpscaleBackdrop1080p(b *testing.B) {
+	out := &lockOut{w: 1920, h: 1080, backdrop: render.New(480, 270)}
+	dst := make([]byte, out.w*out.h*4)
+	b.ReportAllocs()
+	for b.Loop() {
+		out.upscaleBackdrop(dst)
+	}
+}
