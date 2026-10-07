@@ -111,6 +111,32 @@ func TestGpuRedRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGpuOverlappingBackendsSurviveClose(t *testing.T) {
+	first := newTestGpuBackend(t, "rain", 2, 2)
+	second := newTestGpuBackend(t, "fire", 4, 4)
+	draw := func(b *gpuBackend, col [4]float32, want []byte) {
+		t.Helper()
+		pixels := make([]byte, b.w*b.h*4)
+		if err := b.paintSolid(col, pixels, b.w*4); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < len(pixels); i += 4 {
+			if !bytes.Equal(pixels[i:i+4], want) {
+				t.Fatalf("backend %dx%d pixel %d: %v, want %v", b.w, b.h, i/4, pixels[i:i+4], want)
+			}
+		}
+	}
+	draw(first, [4]float32{1, 0, 0, 1}, []byte{0, 0, 255, 255})
+	draw(second, [4]float32{0, 0, 1, 1}, []byte{255, 0, 0, 255})
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Resize(3, 3); err != nil {
+		t.Fatal("closing another backend invalidated the survivor:", err)
+	}
+	draw(first, [4]float32{1, 0, 0, 1}, []byte{0, 0, 255, 255})
+}
+
 // The worker hands rows wider than the image; only the first w pixels of each
 // row may be touched, and padding must keep whatever the caller left there.
 func TestGpuDrawHonorsStride(t *testing.T) {

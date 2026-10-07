@@ -18,43 +18,43 @@ package lockd
 // GBM is resolved at runtime so the build needs no gbm at link time: a host
 // without libgbm or a render node falls back to the surfaceless platform.
 struct gbm_device;
-static void *gpu_gbm_lib = NULL;
-static int gpu_gbm_fd = -1;
-static struct gbm_device *gpu_gbm_dev = NULL;
+struct gpu_gbm {
+	void *lib;
+	int fd;
+	struct gbm_device *dev;
+};
 
-static void gpu_gbm_close(void) {
-	if (gpu_gbm_dev != NULL) {
+static void gpu_gbm_close(struct gpu_gbm *g) {
+	if (g->dev != NULL) {
 		typedef void (*destroy_fn)(struct gbm_device *);
-		destroy_fn destroy = (destroy_fn)dlsym(gpu_gbm_lib, "gbm_device_destroy");
-		if (destroy != NULL) { destroy(gpu_gbm_dev); }
-		gpu_gbm_dev = NULL;
+		destroy_fn destroy = (destroy_fn)dlsym(g->lib, "gbm_device_destroy");
+		if (destroy != NULL) { destroy(g->dev); }
+		g->dev = NULL;
 	}
-	if (gpu_gbm_fd >= 0) { close(gpu_gbm_fd); gpu_gbm_fd = -1; }
-	if (gpu_gbm_lib != NULL) { dlclose(gpu_gbm_lib); gpu_gbm_lib = NULL; }
+	if (g->fd >= 0) { close(g->fd); g->fd = -1; }
+	if (g->lib != NULL) { dlclose(g->lib); g->lib = NULL; }
 }
 
 // gpu_gbm_display binds the first render node to EGL's GBM platform, the path
 // that reaches the hardware driver. EGL_NO_DISPLAY means no hardware path;
-// the caller falls back to the surfaceless (software) platform. One device per
-// process: the renderer keeps a single backend alive and the Go side
-// serializes every EGL call behind one mutex.
-static EGLDisplay gpu_gbm_display(void) {
+// the caller falls back to the surfaceless platform. Each backend owns its
+// device until its EGL display has been terminated.
+static EGLDisplay gpu_gbm_display(struct gpu_gbm *g) {
 	typedef struct gbm_device *(*create_fn)(int);
 	typedef EGLDisplay (*get_platform_fn)(EGLenum, void *, const EGLint *);
 	get_platform_fn get = (get_platform_fn)eglGetProcAddress("eglGetPlatformDisplay");
 	if (get == NULL) { return EGL_NO_DISPLAY; }
-	gpu_gbm_close(); // a previous attempt leaves nothing behind
-	gpu_gbm_lib = dlopen("libgbm.so.1", RTLD_NOW | RTLD_LOCAL);
-	if (gpu_gbm_lib == NULL) { return EGL_NO_DISPLAY; }
-	create_fn create = (create_fn)dlsym(gpu_gbm_lib, "gbm_create_device");
-	if (create == NULL) { gpu_gbm_close(); return EGL_NO_DISPLAY; }
+	g->lib = dlopen("libgbm.so.1", RTLD_NOW | RTLD_LOCAL);
+	if (g->lib == NULL) { return EGL_NO_DISPLAY; }
+	create_fn create = (create_fn)dlsym(g->lib, "gbm_create_device");
+	if (create == NULL) { gpu_gbm_close(g); return EGL_NO_DISPLAY; }
 	// ponytail: renderD128 only, iterate nodes if multi-GPU selection matters.
-	gpu_gbm_fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
-	if (gpu_gbm_fd < 0) { gpu_gbm_close(); return EGL_NO_DISPLAY; }
-	gpu_gbm_dev = create(gpu_gbm_fd);
-	if (gpu_gbm_dev == NULL) { gpu_gbm_close(); return EGL_NO_DISPLAY; }
-	EGLDisplay d = get(EGL_PLATFORM_GBM_KHR, gpu_gbm_dev, NULL);
-	if (d == EGL_NO_DISPLAY) { gpu_gbm_close(); return EGL_NO_DISPLAY; }
+	g->fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
+	if (g->fd < 0) { gpu_gbm_close(g); return EGL_NO_DISPLAY; }
+	g->dev = create(g->fd);
+	if (g->dev == NULL) { gpu_gbm_close(g); return EGL_NO_DISPLAY; }
+	EGLDisplay d = get(EGL_PLATFORM_GBM_KHR, g->dev, NULL);
+	if (d == EGL_NO_DISPLAY) { gpu_gbm_close(g); return EGL_NO_DISPLAY; }
 	return d;
 }
 
@@ -171,6 +171,7 @@ type gpuBackend struct {
 	platform, renderer, vendor string
 
 	display C.EGLDisplay
+	gbm     *C.struct_gpu_gbm
 	ctx     C.EGLContext
 	surface C.EGLSurface
 
@@ -223,7 +224,7 @@ func newGpuBackend(effect, palette string, width, height int) (EffectBackend, er
 	// onto another one between calls, which would leave GL without a context.
 	runtime.LockOSThread()
 	b := &gpuBackend{effect: effect, palette: palette, pal: pal,
-		threaded: true, seed: effectSeed(effect, palette)}
+		threaded: true, gbm: &C.struct_gpu_gbm{fd: -1}, seed: effectSeed(effect, palette)}
 
 	if err := b.init(); err != nil {
 		b.close() // tolerates a half-built state and unpins the thread
@@ -241,7 +242,7 @@ func newGpuBackend(effect, palette string, width, height int) (EffectBackend, er
 }
 
 func (b *gpuBackend) init() error {
-	dpy, platform, err := eglOpenDisplay()
+	dpy, platform, err := eglOpenDisplay(b.gbm)
 	if err != nil {
 		return err
 	}
@@ -320,6 +321,9 @@ func (b *gpuBackend) uploadFullscreenTriangle() error {
 func (b *gpuBackend) Resize(w, h int) error {
 	glMu.Lock()
 	defer glMu.Unlock()
+	if err := b.makeCurrent(); err != nil {
+		return err
+	}
 	return b.resize(w, h)
 }
 
@@ -400,6 +404,9 @@ func (b *gpuBackend) Step() error {
 func (b *gpuBackend) Draw(pixels []byte, stride int) error {
 	glMu.Lock()
 	defer glMu.Unlock()
+	if err := b.makeCurrent(); err != nil {
+		return err
+	}
 
 	if b.ticks == 0 {
 		b.ticks = 1
@@ -483,6 +490,9 @@ func (b *gpuBackend) Close() error {
 func (b *gpuBackend) glErrors() int {
 	glMu.Lock()
 	defer glMu.Unlock()
+	if b.makeCurrent() != nil {
+		return -1
+	}
 	n := 0
 	for C.glGetError() != C.GL_NO_ERROR {
 		n++
@@ -496,12 +506,22 @@ func (b *gpuBackend) glErrors() int {
 func (b *gpuBackend) paintSolid(rgba [4]float32, dst []byte, stride int) error {
 	glMu.Lock()
 	defer glMu.Unlock()
+	if err := b.makeCurrent(); err != nil {
+		return err
+	}
 	C.glBindFramebuffer(C.GL_FRAMEBUFFER, b.fbo)
 	C.glViewport(0, 0, C.GLsizei(b.w), C.GLsizei(b.h))
 	C.glClearColor(C.GLfloat(rgba[0]), C.GLfloat(rgba[1]), C.GLfloat(rgba[2]), C.GLfloat(rgba[3]))
 	C.glClear(C.GL_COLOR_BUFFER_BIT)
 	C.glFinish()
 	return b.readback(dst, stride)
+}
+
+func (b *gpuBackend) makeCurrent() error {
+	if b.closed {
+		return fmt.Errorf("gpu: backend closed")
+	}
+	return eglMakeCurrent(b.display, b.surface, b.surface, b.ctx)
 }
 
 // close assumes glMu is already held, so construction failure paths can reuse it.
@@ -511,38 +531,44 @@ func (b *gpuBackend) close() error {
 	}
 	b.closed = true
 	if b.display != eglNone {
+		if b.ctx != eglNoContext && eglMakeCurrent(b.display, b.surface, b.surface, b.ctx) == nil {
+			if b.fbo != 0 {
+				C.glDeleteFramebuffers(1, &b.fbo)
+			}
+			if b.tex != 0 {
+				C.glDeleteTextures(1, &b.tex)
+			}
+			for i := 0; i < 2; i++ {
+				if b.sfbo[i] != 0 {
+					C.glDeleteFramebuffers(1, &b.sfbo[i])
+				}
+				if b.stex[i] != 0 {
+					C.glDeleteTextures(1, &b.stex[i])
+				}
+			}
+			if b.vbo != 0 {
+				C.glDeleteBuffers(1, &b.vbo)
+			}
+			if b.stepProg != 0 {
+				C.glDeleteProgram(b.stepProg)
+			}
+			if b.drawProg != 0 {
+				C.glDeleteProgram(b.drawProg)
+			}
+		}
 		C.eglMakeCurrent(b.display, eglNoSurface, eglNoSurface, eglNoContext)
-		if b.fbo != 0 {
-			C.glDeleteFramebuffers(1, &b.fbo)
-		}
-		if b.tex != 0 {
-			C.glDeleteTextures(1, &b.tex)
-		}
-		for i := 0; i < 2; i++ {
-			if b.sfbo[i] != 0 {
-				C.glDeleteFramebuffers(1, &b.sfbo[i])
-			}
-			if b.stex[i] != 0 {
-				C.glDeleteTextures(1, &b.stex[i])
-			}
-		}
-		if b.vbo != 0 {
-			C.glDeleteBuffers(1, &b.vbo)
-		}
-		if b.stepProg != 0 {
-			C.glDeleteProgram(b.stepProg)
-		}
-		if b.drawProg != 0 {
-			C.glDeleteProgram(b.drawProg)
-		}
 		if b.ctx != eglNoContext {
 			C.eglDestroyContext(b.display, b.ctx)
 		}
 		if b.surface != eglNoSurface {
 			C.eglDestroySurface(b.display, b.surface)
 		}
-		C.eglTerminate(b.display)
-		C.gpu_gbm_close()
+		eglUsers[b.display]--
+		if eglUsers[b.display] == 0 {
+			C.eglTerminate(b.display)
+			delete(eglUsers, b.display)
+		}
+		C.gpu_gbm_close(b.gbm)
 	}
 	if b.threaded {
 		runtime.UnlockOSThread()
@@ -559,13 +585,13 @@ func (b *gpuBackend) close() error {
 // display last (surfaceless is a client-side extension that NVIDIA's EGL does
 // not advertise, so the legacy path stays). The platform name rides along for
 // the diagnostics line.
-func eglOpenDisplay() (C.EGLDisplay, string, error) {
-	if d := C.gpu_gbm_display(); d != eglNone {
+func eglOpenDisplay(gbm *C.struct_gpu_gbm) (C.EGLDisplay, string, error) {
+	if d := C.gpu_gbm_display(gbm); d != eglNone {
 		if eglInitialize(d) == nil {
 			return d, "gbm", nil
 		}
 		C.eglTerminate(d)
-		C.gpu_gbm_close()
+		C.gpu_gbm_close(gbm)
 	}
 	if eglHasExtension(eglNone, "EGL_MESA_platform_surfaceless") {
 		if d := C.gpu_surfaceless_display(); d != eglNone {
@@ -594,11 +620,19 @@ func glString(name C.GLenum) string {
 	return C.GoString((*C.char)(unsafe.Pointer(p)))
 }
 
+// eglUsers is protected by glMu; surfaceless/default can share a display.
+var eglUsers = make(map[C.EGLDisplay]int)
+
 func eglInitialize(d C.EGLDisplay) error {
+	if eglUsers[d] > 0 {
+		eglUsers[d]++
+		return nil
+	}
 	major, minor := C.EGLint(0), C.EGLint(0)
 	if C.eglInitialize(d, &major, &minor) != C.EGL_TRUE {
 		return fmt.Errorf("gpu: eglInitialize failed (EGL error 0x%x)", eglErr())
 	}
+	eglUsers[d] = 1
 	return nil
 }
 
