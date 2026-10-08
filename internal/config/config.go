@@ -47,6 +47,11 @@ type Config struct {
 	Blur *bool `json:"blur_backdrop"`
 	// BlurRadius is the box-blur radius in pixels, clamped to [0,64].
 	BlurRadius *int `json:"blur_radius"`
+	// Media shows the now-playing caption; IdleMedia keeps it on the idle
+	// screensaver. Nil means on. Track titles are visible to anyone at the
+	// machine, so both can be turned off.
+	Media     *bool `json:"media"`
+	IdleMedia *bool `json:"idle_media"`
 	// EffectBackend selects the effect engine: auto, cpu or gpu. Nil means auto.
 	EffectBackend *string `json:"effect_backend"`
 	// EffectGpuPowerSave caps the GPU path while on battery. Nil means enabled.
@@ -58,6 +63,12 @@ type Config struct {
 
 // BlurBackdrop reports whether the frozen blurred backdrop is wanted.
 func (c Config) BlurBackdrop() bool { return c.Blur == nil || *c.Blur }
+
+// ShowMedia reports whether the now-playing caption is wanted at all.
+func (c Config) ShowMedia() bool { return c.Media == nil || *c.Media }
+
+// ShowIdleMedia reports whether the caption stays on the idle screensaver.
+func (c Config) ShowIdleMedia() bool { return c.ShowMedia() && (c.IdleMedia == nil || *c.IdleMedia) }
 
 // BackendChoice returns the effect engine: "cpu", "gpu", or "auto" when unset
 // or unrecognized.

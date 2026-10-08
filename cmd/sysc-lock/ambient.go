@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/sysc-lock/internal/ambient"
+	"github.com/Nomadcxx/sysc-lock/internal/config"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
 )
 
@@ -55,6 +56,15 @@ func (r *ambientRow) Get(now time.Time, cornerRunes, captionRunes int) ambient.S
 		r.status = loadAmbient(r.path, now, cornerRunes, captionRunes)
 	}
 	return r.status
+}
+
+// applyMediaSettings drops the caption when media is off and reports whether
+// it may stay on the idle screensaver. Corner and alert are never affected.
+func applyMediaSettings(st ambient.Status, cfg config.Config) (ambient.Status, bool) {
+	if !cfg.ShowMedia() {
+		st.Caption = nil
+	}
+	return st, cfg.ShowIdleMedia()
 }
 
 // ambientChild is the running collector, or the zero value when it never

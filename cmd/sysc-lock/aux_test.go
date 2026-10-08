@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/Nomadcxx/sysc-lock/internal/ambient"
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
+	"github.com/Nomadcxx/sysc-lock/internal/config"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
 	"github.com/Nomadcxx/sysc-lock/internal/options"
@@ -607,5 +608,25 @@ func TestPageKeysAreOptionsAndNeverCredentials(t *testing.T) {
 	g.busy = false
 	if g.pressOptions(r, optionsKey(lockd.Key{PageUp: true, Released: true}), o, now) {
 		t.Fatal("release mutated header")
+	}
+}
+
+func TestApplyMediaSettings(t *testing.T) {
+	st := ambient.Status{Corner: []ambient.Span{{Text: "Wi-Fi"}}, Caption: []ambient.Span{{Text: "♪ x"}}, Alert: "a"}
+	off := false
+	cfg := config.Default()
+	got, idle := applyMediaSettings(st, cfg)
+	if got.Caption == nil || !idle {
+		t.Fatal("defaults keep the caption on the form and idle")
+	}
+	cfg.IdleMedia = &off
+	if got, idle = applyMediaSettings(st, cfg); got.Caption == nil || idle {
+		t.Fatal("idle_media:false keeps the form caption only")
+	}
+	cfg = config.Default()
+	cfg.Media = &off
+	got, idle = applyMediaSettings(st, cfg)
+	if got.Caption != nil || idle || ambient.Plain(got.Corner) != "Wi-Fi" || got.Alert != "a" {
+		t.Fatalf("media:false drops only the caption: %+v idle=%v", got, idle)
 	}
 }

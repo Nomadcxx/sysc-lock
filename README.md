@@ -74,11 +74,15 @@ and the guided installer runs exactly its steps.
     sysc-lock --describe         # JSON presentation choices and defaults
     sysc-lock --version
 
-While the password entry is revealed, the owner may show one ambient row
-(battery, link, playing track title/artist, temperature) read from the collector's snapshot file;
-it is a read-only hint, never an unlock path.
-Paused or stopped players hide track metadata. Long titles fit the row before
-artists; unsupported font glyphs display as `?`.
+While locked, the top-right corner shows network and battery, read from the
+collector's snapshot file: `Wi-Fi • [██████░░░░] 63%`, with `charging`,
+`full`, `plugged` or `LOW` (20% and under, discharging) spelled out, and
+`Offline` when there is no default route. The corner stays on the idle
+screen. A playing track appears under the date as `♪ Title — Artist`; a
+paused one as `paused · Title`. Titles the lock font cannot draw give way to
+the artist. On a discharging battery at 10% or less, the form's status row
+says so whenever no error is showing. All of it is a read-only hint, never
+an unlock path.
 
 The service requires Niri's startup environment: XDG_SESSION_ID, NIRI_SOCKET,
 WAYLAND_DISPLAY and XDG_RUNTIME_DIR. Registration verifies the real UID,
@@ -88,7 +92,7 @@ is supported. Conflicting or stale registration fails explicitly.
 Presentation loads `$XDG_CONFIG_HOME/sysc-lock/config.json` at each acquisition:
 
 ```json
-{"effect":"none","palette":"nord","reduced_motion":false,"clock_style":"kompaktblk","clock_24h":false,"effect_fps":20,"effect_backend":"auto","effect_gpu_power_save":true,"blur_backdrop":true,"blur_radius":24,"power_actions":["logout","reboot","shutdown"]}
+{"effect":"none","palette":"nord","reduced_motion":false,"clock_style":"kompaktblk","clock_24h":false,"effect_fps":20,"effect_backend":"auto","effect_gpu_power_save":true,"blur_backdrop":true,"blur_radius":24,"media":true,"idle_media":true,"power_actions":["logout","reboot","shutdown"]}
 ```
 
 `effect` is optional: `none` (default) keeps the frozen blurred desktop and
@@ -177,6 +181,12 @@ box-blurs it once (`blur_radius`, 0-64, default 24) and freezes it as the
 backdrop; effects never animate behind it. A compositor without screencopy, a
 refused capture or `SYSC_LOCK_WALLPAPER` keeps the previous behaviour. Pixels
 stay in memory and are wiped when the acquisition ends.
+
+`media` (default true) shows the now-playing caption; `false` hides it
+everywhere. `idle_media` (default true) keeps it on the idle screen; `false`
+shows it on the lock form only. Track titles are visible to anyone at the
+machine.
+
 The owner resolves the PAM account once per acquisition from the real UID.
 
 The CLI prints `sysc-lock: locked` on a sealed snapshot and returns success only
