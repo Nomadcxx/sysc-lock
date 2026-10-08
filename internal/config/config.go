@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Nomadcxx/sysc-Go/animations"
 	"github.com/Nomadcxx/sysc-terminal/renderer"
@@ -32,6 +33,7 @@ const (
 )
 
 type Config struct {
+	FollowShell   *bool  `json:"follow_shell"`
 	Effect        string `json:"effect"`
 	Palette       string `json:"palette"`
 	ReducedMotion bool   `json:"reduced_motion"`
@@ -231,4 +233,37 @@ func Save(path string, c Config) error {
 		return err
 	}
 	return os.Rename(f.Name(), path)
+}
+
+// FollowsShell defaults to true; an explicit palette choice can opt out.
+func (c Config) FollowsShell() bool { return c.FollowShell == nil || *c.FollowShell }
+
+// WithShellTheme resolves the user's last committed named shell palette.
+// An invalid or unavailable selection must never keep the locker from starting.
+func (c Config) WithShellTheme() Config {
+	if !c.FollowsShell() {
+		return c
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return c
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "sysc-shell", "shell-theme"), os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return c
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 64 {
+		return c
+	}
+	data, err := io.ReadAll(io.LimitReader(f, 65))
+	if err != nil || len(data) > 64 {
+		return c
+	}
+	name := strings.TrimSpace(string(data))
+	if animations.GetThemeMetadata(name) != nil {
+		c.Palette = name
+	}
+	return c
 }

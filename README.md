@@ -272,3 +272,9 @@ each connection, socket and version pin.
 
 <a href="https://github.com/Nomadcxx"><img src="https://raw.githubusercontent.com/Nomadcxx/Nomadcxx/main/assets/rama-mark.svg" height="22" alt="RAMA"></a> — terminal-native tooling for the linux desktop.
 [More projects →](https://github.com/Nomadcxx) · [Sponsor](https://github.com/sponsors/Nomadcxx) ❤️
+
+## Shell theme following
+
+The locker follows the user's committed sysc-shell named theme at each lock. Sysc-shell publishes the selection to `$XDG_CONFIG_HOME/sysc-shell/shell-theme` (default `~/.config/sysc-shell/shell-theme`). Missing, invalid or unsupported selections preserve the configured palette.
+
+Set `"follow_shell": false` in the locker config to keep an independent palette. Choosing a theme in the locker's options also disables following. Sysc-shell's Lock Screen settings provide a **Follow shell theme** switch. Generated and custom shell palettes retain the locker fallback until color transport supports them.
