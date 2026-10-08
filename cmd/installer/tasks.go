@@ -288,7 +288,9 @@ func installTasks() []task {
 					return err
 				}
 				cc := strings.TrimSpace(out)
-				probe := goCmd(ctx, cc, "-E", "-x", "-")
+				// No -x: a trailing "-x -" makes gcc read "-" as its language
+				// argument, leaving no input file and failing even with headers present.
+				probe := goCmd(ctx, cc, "-E", "-")
 				probe.Dir = r.opts.root
 				probe.Stdin = strings.NewReader("#include <security/pam_appl.h>\n")
 				if _, err := r.runLogged("Check toolchain", probe); err != nil {
