@@ -37,9 +37,9 @@ func NewGather() func(time.Time) Snapshot {
 	weather := newWeatherFromConfig()
 	return func(now time.Time) Snapshot {
 		s := Snapshot{AsOf: now}
-		if pct, charging, ok := readBattery(); ok {
+		if pct, power, ok := readBattery(); ok {
 			s.BatteryPct = &pct
-			s.Charging = &charging
+			s.Power = power
 		}
 		s.Link = readLink()
 		media := readMedia()

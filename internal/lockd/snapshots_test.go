@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/sysc-lock/internal/ambient"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
@@ -96,7 +97,9 @@ func TestOfflineViewSnapshots(t *testing.T) {
 			if name == "ambient" {
 				v.Reveal.Show(now)
 				v.Hint = power.ScreenHelp
-				v.Ambient = "82% • Wi-Fi • playing • 18°"
+				pct := 82
+				temp := 18.0
+				v.Ambient = ambient.Snapshot{BatteryPct: &pct, Power: ambient.PowerDischarging, Link: ambient.LinkWifi, Media: ambient.Playing, Title: "Midnight City", Artist: "M83", Temp: &temp}.Status(40, 48, Covered)
 			}
 			if name == "reduced-motion" {
 				v.Render(fb, now)
@@ -128,23 +131,6 @@ func TestOfflineViewSnapshots(t *testing.T) {
 			}
 			if closeErr != nil {
 				t.Fatal(closeErr)
-			}
-			if name == "hidden" || name == "ambient" {
-				s := Layout(w, h, 1, "", v.clockText(now))
-				ground := 0
-				for y := s.Ambient.Min.Y; y < s.Ambient.Max.Y; y++ {
-					for x := s.Ambient.Min.X; x < s.Ambient.Max.X; x++ {
-						if color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA) == panelGround {
-							ground++
-						}
-					}
-				}
-				if name == "hidden" && ground != s.Ambient.Dx()*s.Ambient.Dy() {
-					t.Fatalf("hidden: form footer must retain its opaque backing, got %d ground pixels", ground)
-				}
-				if name == "ambient" && ground < 100 {
-					t.Fatalf("ambient: row missing its ground, counted %d pixels", ground)
-				}
 			}
 			if name == "power" || name == "power-hold" {
 				s := Layout(w, h, 1, "", v.clockText(now))
@@ -217,7 +203,8 @@ func TestOfflineParitySnapshots(t *testing.T) {
 			v.Caps = tc.state == "caps"
 			v.Layout = "us"
 			v.Hint = "F1 Options | Enter Unlock"
-			v.Ambient = "[#####.....] 53% | Wi-Fi | Song - Artist"
+			pct := 53
+			v.Ambient = ambient.Snapshot{BatteryPct: &pct, Power: ambient.PowerDischarging, Link: ambient.LinkWifi, Media: ambient.Playing, Title: "Song", Artist: "Artist"}.Status(40, 48, Covered)
 			v.Reveal.Show(now)
 			fb := render.New(tc.w, tc.h)
 			v.Render(fb, now)

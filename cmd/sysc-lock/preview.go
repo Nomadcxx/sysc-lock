@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/sysc-Go/animations"
+	"github.com/Nomadcxx/sysc-lock/internal/ambient"
 	"github.com/Nomadcxx/sysc-lock/internal/art"
 	"github.com/Nomadcxx/sysc-lock/internal/config"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
@@ -68,7 +69,8 @@ func runPreview(in io.Reader, out io.Writer) error {
 	view.TextEffect, view.TextPalette = req.Config.TextEffect, req.Config.Palette
 	view.StyleName, view.Clock24, view.Reduced = req.Config.ClockStyle, req.Config.Clock24h, req.Config.ReducedMotion
 	view.Hint = "F1 Options - Enter Unlock"
-	view.Ambient = "[||||||....] 63% - Wi-Fi - Song / Artist"
+	pct := 63
+	view.Ambient = ambient.Snapshot{BatteryPct: &pct, Power: ambient.PowerDischarging, Link: ambient.LinkWifi, Media: ambient.Playing, Title: "Night Drive", Artist: "SYSC"}.Status(40, 48, lockd.Covered)
 	now := time.Date(2026, time.October, 8, 13, 24, 0, 0, time.UTC)
 	view.Reveal.Show(now)
 	fb := render.New(req.Width, req.Height)

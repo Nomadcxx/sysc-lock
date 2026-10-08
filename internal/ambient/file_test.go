@@ -126,3 +126,16 @@ func TestWriteAndLoadBoundMetadata(t *testing.T) {
 		t.Fatal("writer did not bound metadata")
 	}
 }
+
+func TestLoadIgnoresTheRetiredChargingField(t *testing.T) {
+	now := time.Unix(900, 0)
+	path := filepath.Join(t.TempDir(), "ambient.json")
+	body := `{"as_of":"` + now.Format(time.RFC3339Nano) + `","battery_pct":50,"charging":true}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Load(path, now)
+	if err != nil || s.BatteryPct == nil || *s.BatteryPct != 50 || s.Power != "" {
+		t.Fatalf("old snapshot must load with an unknown power state: %+v %v", s, err)
+	}
+}

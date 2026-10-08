@@ -342,3 +342,33 @@ func TestHeaderPreferencesPreserveExistingConfig(t *testing.T) {
 		t.Fatal("invalid text effect accepted")
 	}
 }
+
+func TestMediaSettingsDefaultOn(t *testing.T) {
+	c := Default()
+	if !c.ShowMedia() || !c.ShowIdleMedia() {
+		t.Fatal("media caption is on by default, including the idle screen")
+	}
+}
+
+func TestMediaOffAlsoHidesIdle(t *testing.T) {
+	off := false
+	c := Default()
+	c.Media = &off
+	if c.ShowMedia() || c.ShowIdleMedia() {
+		t.Fatal("media:false must hide the caption everywhere")
+	}
+}
+
+func TestLoadReadsMediaSettings(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"idle_media":false}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.ShowMedia() || c.ShowIdleMedia() {
+		t.Fatalf("idle_media:false keeps the form caption only: media=%v idle=%v", c.ShowMedia(), c.ShowIdleMedia())
+	}
+}

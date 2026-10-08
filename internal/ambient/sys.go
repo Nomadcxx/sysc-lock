@@ -14,11 +14,12 @@ type FS interface {
 }
 
 // ReadBattery reads the first power-supply entry of type Battery under root.
-// Returns percent, charging, and whether a battery exists at all.
-func ReadBattery(fs FS, root string) (int, bool, bool) {
+// Returns percent, the normalized power state ("" when unknown), and whether
+// a battery exists at all.
+func ReadBattery(fs FS, root string) (int, string, bool) {
 	names, err := fs.ReadDir(root)
 	if err != nil {
-		return 0, false, false
+		return 0, "", false
 	}
 	for _, name := range names {
 		dir := filepath.Join(root, name)
@@ -34,13 +35,27 @@ func ReadBattery(fs FS, root string) (int, bool, bool) {
 		if err != nil {
 			continue
 		}
-		charging := false
+		power := ""
 		if st, err := fs.ReadFile(filepath.Join(dir, "status")); err == nil {
-			charging = strings.TrimSpace(string(st)) == "Charging"
+			power = powerState(strings.TrimSpace(string(st)))
 		}
-		return pct, charging, true
+		return pct, power, true
 	}
-	return 0, false, false
+	return 0, "", false
+}
+
+func powerState(status string) string {
+	switch status {
+	case "Charging":
+		return PowerCharging
+	case "Discharging":
+		return PowerDischarging
+	case "Full":
+		return PowerFull
+	case "Not charging":
+		return PowerPlugged
+	}
+	return ""
 }
 
 // ReadLink parses procRoute for the first non-loopback default route and
@@ -112,5 +127,5 @@ const (
 	sysClassNet    = "/sys/class/net"
 )
 
-func readBattery() (int, bool, bool) { return ReadBattery(osFS{}, sysPowerSupply) }
-func readLink() string               { return ReadLink(osFS{}, procNetRoute, sysClassNet) }
+func readBattery() (int, string, bool) { return ReadBattery(osFS{}, sysPowerSupply) }
+func readLink() string                 { return ReadLink(osFS{}, procNetRoute, sysClassNet) }

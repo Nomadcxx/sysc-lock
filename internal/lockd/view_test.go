@@ -11,21 +11,23 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/sysc-Go/animations"
+	"github.com/Nomadcxx/sysc-lock/internal/ambient"
 	"github.com/Nomadcxx/sysc-lock/internal/art"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
 	xdraw "golang.org/x/image/draw"
+	"golang.org/x/image/math/fixed"
 )
 
-func TestAmbientReplacesUnsupportedGlyphs(t *testing.T) {
+func TestStatusReplacesUnsupportedGlyphs(t *testing.T) {
 	v := NewView(theme.Default(), "user", "host")
 	s := Layout(960, 720, 1, v.StyleName, "12:34 PM")
 	a, b := render.New(960, 720), render.New(960, 720)
-	v.Ambient = "playing | Song \U0010ffff - Artist"
-	v.drawAmbient(a, s)
-	v.Ambient = "playing | Song ? - Artist"
-	v.drawAmbient(b, s)
+	v.Ambient = ambient.Status{Caption: []ambient.Span{{Text: "♪ Song \U0010ffff", Tone: ambient.ToneInk}}}
+	v.drawStatus(a, s, true)
+	v.Ambient.Caption = []ambient.Span{{Text: "♪ Song ?", Tone: ambient.ToneInk}}
+	v.drawStatus(b, s, true)
 	if !bytes.Equal(a.Pix, b.Pix) {
 		t.Fatal("unsupported metadata glyph did not render as readable fallback")
 	}
@@ -190,7 +192,11 @@ func TestLogoRenderingReusesScalingAndPreservesPixels(t *testing.T) {
 func BenchmarkForeground1080p(b *testing.B) {
 	v := NewView(theme.Default(), "user", "host")
 	v.Scale, v.Reduced = 1.25, true
-	v.Hint, v.Ambient = "F1 Options - Enter Unlock", "|||| 63% - Wi-Fi - playing"
+	v.Hint = "F1 Options - Enter Unlock"
+	v.Ambient = ambient.Status{
+		Corner:  []ambient.Span{{Text: "Wi-Fi", Tone: ambient.ToneMuted}, {Text: " • ", Tone: ambient.ToneDim}, {Text: "[██████░░░░] 63%", Tone: ambient.ToneInk}},
+		Caption: []ambient.Span{{Text: "♪ ", Tone: ambient.ToneAccent}, {Text: "Midnight City", Tone: ambient.ToneInk}},
+	}
 	fb := render.New(1920, 1080)
 	now := time.Unix(10, 0)
 	v.Render(fb, now)
@@ -318,8 +324,9 @@ func TestSceneFitsEverySize(t *testing.T) {
 			fb := image.Rect(0, 0, c.w, c.h)
 			for name, r := range map[string]image.Rectangle{
 				"clock": s.ClockBox, "date": s.Date, "entry": s.Entry,
-				"backing": s.Backing, "status": s.Status, "ambient": s.Ambient,
+				"backing": s.Backing, "status": s.Status,
 				"menu": s.Menu, "help": s.Help, "logo": s.Logo,
+				"corner": s.Corner, "caption": s.Caption,
 				"frame": s.Frame, "rule": s.Rule, "label": s.Label, "identity": s.Identity, "options": s.OptionsMenu,
 			} {
 				if r.Empty() {
@@ -333,30 +340,13 @@ func TestSceneFitsEverySize(t *testing.T) {
 				(!s.Date.Empty() && s.Date.Max.Y > s.Entry.Min.Y) || (!s.ClockBox.Empty() && s.ClockBox.Max.Y > s.Entry.Min.Y) {
 				t.Fatalf("%dx%d %s: stack overlaps %+v", c.w, c.h, style, s)
 			}
-			if !s.Ambient.Empty() && s.Ambient.Min.Y < s.Status.Max.Y {
-				t.Fatalf("%dx%d %s: ambient overlaps status", c.w, c.h, style)
-			}
-			if !s.Ambient.Empty() && !s.Help.Empty() && s.Ambient.Max.Y > s.Help.Min.Y {
-				t.Fatalf("%dx%d %s: ambient overlaps help", c.w, c.h, style)
+			if !s.Caption.Empty() && s.Caption.Max.Y > s.Entry.Min.Y {
+				t.Fatalf("%dx%d %s: caption overlaps the entry", c.w, c.h, style)
 			}
 			if s.Help.Empty() && c.h > 240 {
 				t.Fatalf("%dx%d %s: the help strip must fit above 240 rows", c.w, c.h, style)
 			}
 		}
-	}
-}
-
-func TestAmbientDropsBeforeHelp(t *testing.T) {
-	s := Layout(320, 240, 1, "kompaktblk", widestClock)
-	if !s.Ambient.Empty() && s.Help.Empty() {
-		t.Fatal("ambient must drop before help")
-	}
-	wide := Layout(960, 720, 1, "kompaktblk", widestClock)
-	if wide.Ambient.Empty() {
-		t.Fatal("ambient must fit at 960x720")
-	}
-	if !wide.Ambient.In(image.Rect(0, 0, 960, 720)) {
-		t.Fatal("ambient outside output")
 	}
 }
 
@@ -506,7 +496,8 @@ func TestSceneStaysInsideItsBounds(t *testing.T) {
 		v.Entry.Append(strings.Repeat("a", 200))
 		v.Reveal.Show(now)
 		v.Hint = "F4 Power • Enter Unlock"
-		v.Ambient = strings.Repeat("82% • Wi-Fi • playing • 18° • ", 10)
+		long := []ambient.Span{{Text: strings.Repeat("82% • Wi-Fi • playing • 18° • ", 10), Tone: ambient.ToneInk}}
+		v.Ambient = ambient.Status{Corner: long, Caption: long}
 		v.Power = &PowerView{
 			Open: true, Title: "Power Options", Progress: 40, Help: "help",
 			Rows: []PowerRow{{Title: "Log out"}, {Title: "Reboot", Selected: true}, {Title: "Cancel"}},
@@ -522,41 +513,6 @@ func TestSceneStaysInsideItsBounds(t *testing.T) {
 				}
 			}
 		}
-	}
-}
-
-func TestAmbientShowsWhileEntryHidden(t *testing.T) {
-	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	v := NewView(theme.Default(), "u", "h")
-	v.Reduced = true
-	v.Ambient = "82% • Wi-Fi • playing • 18°"
-	fb := render.New(960, 720)
-	v.Render(fb, now)
-	s := Layout(960, 720, 1, "", v.clockText(now))
-	if s.Ambient.Empty() {
-		t.Skip("no ambient slot")
-	}
-	got := color.NRGBAModel.Convert(fb.At(s.Ambient.Min.X+1, s.Ambient.Min.Y+1)).(color.NRGBA)
-	if got != panelGround {
-		t.Fatal("the status row stays on screen even while the entry is hidden")
-	}
-}
-
-func TestRevealedAmbientSitsOnGroundInMutedInk(t *testing.T) {
-	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	v := NewView(theme.Default(), "u", "h")
-	v.Reduced = true
-	v.Reveal.Show(now)
-	v.Ambient = "82% • Wi-Fi"
-	fb := render.New(960, 720)
-	v.Render(fb, now)
-	s := Layout(960, 720, 1, "", v.clockText(now))
-	if s.Ambient.Empty() {
-		t.Skip("no ambient slot")
-	}
-	got := color.NRGBAModel.Convert(fb.At(s.Ambient.Min.X+1, s.Ambient.Min.Y+1)).(color.NRGBA)
-	if got != panelGround {
-		t.Fatal("ambient needs a solid backing")
 	}
 }
 
@@ -584,21 +540,8 @@ func TestHintStripFollowsTheForm(t *testing.T) {
 	if gap := s.Help.Min.Y - s.Frame.Max.Y; gap < 8 || gap > 20 {
 		t.Fatalf("hint must follow the form with a nearby gap: %v", s.Help)
 	}
-	if !s.Ambient.Empty() && s.Help.Overlaps(s.Ambient) {
-		t.Fatal("hint overlaps the ambient row")
-	}
 	if s.Help.Overlaps(s.Backing) {
 		t.Fatal("hint overlaps the entry backing")
-	}
-}
-
-func TestAmbientBelongsToTheForm(t *testing.T) {
-	s := Layout(960, 720, 1, "", "12:59:59 PM")
-	if s.Ambient.Empty() {
-		t.Fatal("a 720p output has an ambient slot")
-	}
-	if !s.Ambient.In(s.Backing) || !s.Ambient.In(s.Frame) {
-		t.Fatalf("ambient %v must stay inside the form %v", s.Ambient, s.Frame)
 	}
 }
 
@@ -789,11 +732,12 @@ func TestParityAttemptsAreVisibleAfterTheErrorExpires(t *testing.T) {
 	v.Reduced = true
 	fb := render.New(960, 720)
 	v.Render(fb, now)
-	s := Layout(960, 720, 1, v.StyleName, v.clockText(now))
 	before := append([]byte(nil), fb.Pix...)
 	v.Reject("Incorrect password", now)
 	v.Render(fb, now.Add(5*time.Second))
-	if sameRegion(before, fb.Pix, fb.Stride, s.Backing) {
+	// The attempt row extends the form downward; check the rect it is drawn in.
+	s := Layout(960, 720, 1, v.StyleName, v.clockText(now), v.Attempts)
+	if n, _ := inkIn(fb, s.Attempts, v.ground()); s.Attempts.Empty() || n == 0 || sameRegion(before, fb.Pix, fb.Stride, s.Attempts) {
 		t.Fatal("failed attempt count is not visible after transient error expiry")
 	}
 }
@@ -971,5 +915,226 @@ func TestLockedCaptionIsInsetIntoTopBorder(t *testing.T) {
 	}
 	if !inkAbove {
 		t.Fatal("caption ink stays inside the frame instead of sitting in its border")
+	}
+}
+
+func stackOf(s Scene) image.Rectangle {
+	return s.Header.Union(s.Logo).Union(s.ClockBox).Union(s.Date).Union(s.Caption).
+		Union(s.Rule).Union(s.Frame).Union(s.Backing).Union(s.Help).Union(s.Banner)
+}
+
+func TestStatusCornerSitsTopRightClearOfTheStack(t *testing.T) {
+	for _, c := range []struct {
+		w, h  int
+		scale float64
+	}{{960, 720, 1}, {1536, 864, 1}, {1920, 1080, 1.5}, {3440, 1440, 1}, {1080, 1920, 2}} {
+		s := Layout(c.w, c.h, c.scale, "kompaktblk", widestClock)
+		if s.Corner.Empty() {
+			t.Fatalf("%dx%d@%v: no status corner", c.w, c.h, c.scale)
+		}
+		margin := max(1, int(8*c.scale))
+		if s.Corner.Max.X != c.w-margin || s.Corner.Min.Y != margin {
+			t.Fatalf("%dx%d@%v: corner %v not in the top-right margin", c.w, c.h, c.scale, s.Corner)
+		}
+		if s.Corner.Overlaps(stackOf(s)) {
+			t.Fatalf("%dx%d@%v: corner %v overlaps the stack", c.w, c.h, c.scale, s.Corner)
+		}
+	}
+	for _, size := range [][2]int{{320, 240}, {420, 480}} {
+		s := Layout(size[0], size[1], 1, "kompaktblk", widestClock)
+		if !s.Corner.Empty() && s.Corner.Overlaps(stackOf(s)) {
+			t.Fatalf("%v: corner must drop rather than overlap", size)
+		}
+	}
+}
+
+func TestCaptionFollowsTheDate(t *testing.T) {
+	s := Layout(960, 720, 1, "kompaktblk", widestClock)
+	if s.Caption.Empty() || s.Date.Empty() {
+		t.Fatal("a 720p output has room for date and caption")
+	}
+	if s.Caption.Min.Y < s.Date.Max.Y || (!s.Rule.Empty() && s.Caption.Max.Y > s.Rule.Min.Y) {
+		t.Fatalf("caption %v must sit between the date %v and the form %v", s.Caption, s.Date, s.Rule)
+	}
+	if s.Caption.Min.X != s.Date.Min.X || s.Caption.Dx() != s.Date.Dx() {
+		t.Fatal("caption shares the date's column")
+	}
+}
+
+func TestCaptionDropsBeforeTheForm(t *testing.T) {
+	s := Layout(320, 240, 1, "kompaktblk", widestClock)
+	if !s.Caption.Empty() && (s.Help.Empty() || s.Identity.Empty()) {
+		t.Fatal("the caption must drop before help and the form chrome")
+	}
+}
+
+func TestScreensaverKeepsCornerAndCaption(t *testing.T) {
+	for _, size := range [][2]int{{1920, 1080}, {960, 720}} {
+		s := ScreensaverLayout(size[0], size[1], 1, "kompaktblk", widestClock)
+		form := Layout(size[0], size[1], 1, "kompaktblk", widestClock)
+		if s.Corner != form.Corner {
+			t.Fatalf("%v: the corner must not move between form and idle", size)
+		}
+		if s.Caption.Empty() || s.Caption.Min.Y < s.Date.Max.Y || s.Caption.Dx() != form.Caption.Dx() {
+			t.Fatalf("%v: idle caption %v must follow the date %v", size, s.Caption, s.Date)
+		}
+		if s.Corner.Overlaps(stackOf(s)) {
+			t.Fatalf("%v: idle corner overlaps the stack", size)
+		}
+	}
+}
+
+func inkIn(fb *render.Framebuffer, r image.Rectangle, ground color.NRGBA) (n, maxX int) {
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			if color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA) != ground {
+				n++
+				maxX = max(maxX, x)
+			}
+		}
+	}
+	return n, maxX
+}
+
+func TestStatusCornerIsRightAlignedAndStaysWhileIdle(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	corner := []ambient.Span{{Text: "Wi-Fi • 63%", Tone: ambient.ToneInk}}
+	for _, idle := range []bool{false, true} {
+		v := NewView(theme.Default(), "u", "h")
+		v.Reduced = true
+		v.Ambient = ambient.Status{Corner: corner}
+		at := now
+		if idle {
+			v.Screensaver(now)
+			at = now.Add(6 * time.Minute)
+		}
+		fb := render.New(1920, 1080)
+		v.Render(fb, at)
+		s := Layout(1920, 1080, 1, v.StyleName, v.clockText(at))
+		n, maxX := inkIn(fb, s.Corner, v.Pal.Surface)
+		if n == 0 {
+			t.Fatalf("idle=%v: corner drew nothing", idle)
+		}
+		if maxX < s.Corner.Max.X-12 {
+			t.Fatalf("idle=%v: corner text ends at %d, want right-aligned to %d", idle, maxX, s.Corner.Max.X)
+		}
+	}
+}
+
+func TestIdleCaptionFollowsTheSetting(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	for _, keep := range []bool{false, true} {
+		v := NewView(theme.Default(), "u", "h")
+		v.Reduced = true
+		v.IdleCaption = keep
+		v.Ambient = ambient.Status{Caption: []ambient.Span{{Text: "♪ Midnight City", Tone: ambient.ToneInk}}}
+		v.Screensaver(now)
+		at := now.Add(6 * time.Minute)
+		fb := render.New(1920, 1080)
+		v.Render(fb, at)
+		s := ScreensaverLayout(1920, 1080, 1, v.StyleName, v.clockText(at))
+		if n, _ := inkIn(fb, s.Caption, v.Pal.Surface); (n > 0) != keep {
+			t.Fatalf("IdleCaption=%v: caption ink %d", keep, n)
+		}
+	}
+}
+
+func TestCaptionShowsOnTheForm(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	v := NewView(theme.Default(), "u", "h")
+	v.Reduced = true
+	v.Ambient = ambient.Status{Caption: []ambient.Span{{Text: "♪ Midnight City", Tone: ambient.ToneInk}}}
+	fb := render.New(960, 720)
+	v.Render(fb, now)
+	s := Layout(960, 720, 1, v.StyleName, v.clockText(now))
+	if n, _ := inkIn(fb, s.Caption, v.Pal.Surface); n == 0 {
+		t.Fatal("caption missing on the lock form")
+	}
+}
+
+func TestBatteryAlertYieldsToFormStatus(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	v := NewView(theme.Default(), "u", "h")
+	alert := "Battery at 6%. Connect power."
+	v.Ambient.Alert = alert
+	if got := v.StatusLine(now); got != alert {
+		t.Fatalf("idle status %q, want the alert", got)
+	}
+	v.SetError("Incorrect password", now)
+	if got := v.StatusLine(now); got != "Incorrect password" {
+		t.Fatalf("an error must win over the alert, got %q", got)
+	}
+	if got := v.StatusLine(now.Add(5 * time.Second)); got != alert {
+		t.Fatalf("the alert returns when the error expires, got %q", got)
+	}
+	v.Busy = true
+	if got := v.StatusLine(now.Add(5 * time.Second)); got != "Authenticating..." {
+		t.Fatalf("busy must win over the alert, got %q", got)
+	}
+	v.Busy, v.Ambient.Alert = false, ""
+	if got := v.StatusLine(now.Add(5 * time.Second)); got != "" {
+		t.Fatalf("a cleared snapshot clears the alert, got %q", got)
+	}
+}
+
+func TestStatusTonesMeetContrastOverTheBackdrop(t *testing.T) {
+	v := NewView(theme.Default(), "u", "h")
+	worst := color.NRGBA{R: 85, G: 85, B: 85, A: 255}
+	for tone, floor := range map[ambient.Tone]float64{
+		ambient.ToneMuted: 4.5, ambient.ToneInk: 4.5, ambient.ToneAccent: 4.5,
+		ambient.ToneWarn: 4.5, ambient.ToneDanger: 4.5, ambient.ToneDim: 3,
+	} {
+		if got := contrast(v.tone(tone), worst); got < floor {
+			t.Fatalf("tone %d: %.2f:1 below %.1f:1 over the dimmed backdrop", tone, got, floor)
+		}
+	}
+}
+
+func TestStatusRunesFitTheDrawnFont(t *testing.T) {
+	pct, temp := 100, -12.0
+	snap := ambient.Snapshot{
+		BatteryPct: &pct, Power: ambient.PowerCharging, Link: ambient.LinkWifi, Temp: &temp,
+		Media: ambient.Playing, Title: "Symphony No. 9 in D minor, Op. 125: IV. Presto — Allegro assai", Artist: "Berliner Philharmoniker",
+	}
+	for _, c := range []struct {
+		w, h      int
+		scale, ts float64
+	}{{1920, 1080, 1, 1}, {1920, 1080, 1.5, 1}, {2880, 1800, 2, 1}, {3840, 2160, 2, 1.5}} {
+		v := NewView(theme.Default(), "u", "h")
+		v.Scale, v.TextScale = c.scale, c.ts
+		s := Layout(c.w, c.h, c.scale, v.StyleName, widestClock)
+		corner, caption := v.StatusRunes(s)
+		if corner <= 0 || caption <= 0 {
+			t.Fatalf("%dx%d@%v: no budget (%d, %d)", c.w, c.h, c.scale, corner, caption)
+		}
+		st := snap.Status(corner, caption, Covered)
+		for name, line := range map[string]struct {
+			box   image.Rectangle
+			spans []ambient.Span
+		}{"corner": {s.Corner, st.Corner}, "caption": {s.Caption, st.Caption}} {
+			px := v.textPx(int(14*s.Scale), line.box)
+			if w := textWidth(px, ambient.Plain(line.spans)); w > line.box.Dx() {
+				t.Fatalf("%dx%d@%v ts%v %s: %q is %dpx in a %dpx box", c.w, c.h, c.scale, c.ts, name, ambient.Plain(line.spans), w, line.box.Dx())
+			}
+		}
+	}
+}
+
+func TestDrawRunsShortensOverflowWithAnEllipsis(t *testing.T) {
+	box := image.Rect(100, 10, 300, 30)
+	px := 14
+	f := face(px)
+	adv, _ := f.GlyphAdvance('W')
+	ell, _ := f.GlyphAdvance('…')
+	n := 0
+	for (adv*fixed.Int26_6(n+1) + ell).Ceil() <= box.Dx() {
+		n++
+	}
+	ink := func(ambient.Tone) color.NRGBA { return panelInk }
+	got, want := render.New(400, 40), render.New(400, 40)
+	drawRuns(got, box, 26, []ambient.Span{{Text: strings.Repeat("W", 60)}, {Text: " tail"}}, px, true, ink)
+	drawRuns(want, box, 26, []ambient.Span{{Text: strings.Repeat("W", n) + "…"}}, px, true, ink)
+	if !bytes.Equal(got.Pix, want.Pix) {
+		t.Fatal("overflowing runs must be cut to fit with a trailing ellipsis and keep their alignment")
 	}
 }
