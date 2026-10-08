@@ -113,11 +113,11 @@ func writeDescription(out io.Writer) error {
 		Headers     []string      `json:"headers"`
 		Palettes    []string      `json:"palettes"`
 		Defaults    config.Config `json:"defaults"`
-	}{ClockStyles: art.Names(), Effects: effectChoices(), TextEffects: append([]string{"none"}, renderer.TextEffects()...), Headers: defaultHeaderIDs(), Palettes: animations.GetThemeNames(), Defaults: config.Default()})
+	}{ClockStyles: art.Names(), Effects: effectChoices(), TextEffects: append([]string{"none"}, renderer.TextEffects()...), Headers: configuredHeaderIDs(), Palettes: animations.GetThemeNames(), Defaults: config.Default()})
 }
 
-func defaultHeaderIDs() []string {
-	hs := art.DefaultHeaders()
+func configuredHeaderIDs() []string {
+	hs, _ := art.LoadHeaders(config.HeadersPath())
 	ids := make([]string, len(hs))
 	for i, h := range hs {
 		ids[i] = h.ID

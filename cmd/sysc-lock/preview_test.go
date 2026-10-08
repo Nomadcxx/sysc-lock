@@ -114,3 +114,26 @@ func TestDefaultPreviewShowsHeaderChoices(t *testing.T) {
 		t.Fatal("ordinary shell preview dropped the selected header")
 	}
 }
+
+func TestDescriptionListsCustomHeaderFile(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(config.HeadersPath()), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.HeadersPath(), []byte("ascii_custom=\"\"\"\nCUSTOM\n\"\"\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := writeDescription(&out); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Headers []string `json:"headers"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Headers) != 1 || got.Headers[0] != "ascii_custom" {
+		t.Fatalf("description ignored user catalogue: %v", got.Headers)
+	}
+}
