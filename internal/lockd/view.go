@@ -271,6 +271,17 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	dx := art.Jolt(now.Sub(v.joltStart)) * s.Cell
 	shift := func(r image.Rectangle) image.Rectangle { return r.Add(image.Pt(dx, 0)) }
 	v.drawForm(fb, shift(s.Frame), shift(s.Backing), shift(s.Rule), s.Scale)
+	identity := v.User
+	if v.Host != "" {
+		identity += "@" + v.Host
+	}
+	account := shift(s.Identity)
+	drawTextBoxLeft(fb, account, account.Min.Y+account.Dy()*3/4, identity, v.textPx(account.Dy()*7/10, account), safeInk(panelInk, v.ground(), 4.5))
+	fieldInk := v.muted()
+	if visible {
+		fieldInk = v.accent()
+	}
+	border(fb, shift(s.Entry), fieldInk, max(1, int(s.Scale)))
 	if visible {
 		v.drawLabel(fb, shift(s.Label))
 		v.drawEntry(fb, shift(s.Entry), shift(s.Indicators), s.Scale, now)
@@ -281,27 +292,27 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 			ink = safeInk(panelInk, v.ground(), 4.5)
 		}
 		line := shift(s.Status)
-		drawTextBox(fb, line, line.Min.Y+line.Dy()*3/4, status, v.textPx(line.Dy()*3/5, line), ink)
+		drawTextBoxLeft(fb, line, line.Min.Y+line.Dy()*3/4, status, v.textPx(line.Dy()*7/10, line), ink)
 	}
 	if !s.Attempts.Empty() {
 		attempts := shift(s.Attempts)
-		drawTextBox(fb, attempts, attempts.Min.Y+attempts.Dy()*3/4, "Failed attempts: "+itoa(v.Attempts), v.textPx(s.Attempts.Dy()*3/5, s.Attempts), v.muted())
+		drawTextBoxLeft(fb, attempts, attempts.Min.Y+attempts.Dy()*3/4, "Failed attempts: "+itoa(v.Attempts), v.textPx(s.Attempts.Dy()*7/10, s.Attempts), v.muted())
 	}
 	if !s.Warning.Empty() {
 		for i, text := range []string{"WARNING: Failures may", "lock your account"} {
 			warning := shift(s.Warning)
 			box := image.Rect(warning.Min.X, warning.Min.Y+i*warning.Dy()/2, warning.Max.X, warning.Min.Y+(i+1)*warning.Dy()/2)
-			drawTextBox(fb, box, box.Min.Y+box.Dy()*3/4, text, v.textPx(min(12, int(12*s.Scale)), box), safeInk(panelDanger, v.ground(), 4.5))
+			drawTextBoxLeft(fb, box, box.Min.Y+box.Dy()*3/4, text, v.textPx(box.Dy()*3/5, box), safeInk(panelDanger, v.ground(), 4.5))
 		}
 	}
 	// The guidance and status rows stay on screen at all times, greet-style.
 	v.drawAmbient(fb, s)
 	v.drawHint(fb, s)
 	if v.Power != nil && v.Power.Open {
-		v.drawPopup(fb, s, *v.Power)
+		v.drawPopup(fb, s.Menu, *v.Power, panelDanger)
 	}
 	if v.Options != nil && v.Options.Open {
-		v.drawPopup(fb, s, *v.Options)
+		v.drawPopup(fb, s.OptionsMenu, *v.Options, v.accent())
 	}
 }
 
@@ -315,24 +326,22 @@ func (v *View) drawLabel(fb *render.Framebuffer, r image.Rectangle) {
 	if text == "" {
 		text = "Password:"
 	}
-	drawTextBoxLeft(fb, r, r.Min.Y+r.Dy()*3/4, text, v.textPx(r.Dy()*3/5, r), v.accent())
+	drawTextBoxLeft(fb, r, r.Min.Y+r.Dy()*3/4, text, v.textPx(r.Dy()*7/10, r), v.accent())
 }
 
 // drawEntry draws the entry field inside the framed form, which owns the
-// border and the frost; the field itself stays frameless (greet minimal style).
+// border and opaque backing; content starts at the left inset.
 func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectangle, scale float64, now time.Time) {
 	inner := entry.Inset(max(2, int(8*scale)))
 	sq := max(2, entry.Dy()/4)
 	cy := entry.Min.Y + (entry.Dy()-sq)/2
 	cursorX := inner.Min.X
-	if v.Entry == nil || len(v.Entry.Pass) == 0 {
-		drawTextBox(fb, inner, entry.Min.Y+entry.Dy()*2/3, "PASSWORD", v.textPx(entry.Dy()/2, inner), safeInk(panelInk, v.ground(), 4.5))
-	} else if v.PromptEcho {
+	if v.Entry != nil && len(v.Entry.Pass) > 0 && v.PromptEcho {
 		text := string(v.Entry.Pass)
 		px := v.textPx(entry.Dy()/2, inner)
 		drawTextBoxLeft(fb, inner, entry.Min.Y+entry.Dy()*2/3, text, px, safeInk(panelInk, v.ground(), 4.5))
 		cursorX = inner.Min.X + min(textWidth(px, text), max(0, inner.Dx()-sq))
-	} else {
+	} else if v.Entry != nil && len(v.Entry.Pass) > 0 {
 		step := sq * 3 / 2
 		n := min(len(v.Entry.Pass), max(1, inner.Dx()/step))
 		for i := 0; i < n; i++ {
@@ -351,11 +360,10 @@ func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectang
 	if v.Num {
 		parts = append(parts, "Num Lock")
 	}
-	parts = append(parts, v.User)
 	if v.Layout != "" {
-		parts = append(parts, v.Layout)
+		parts = append(parts, strings.ToUpper(v.Layout))
 	}
-	drawTextBox(fb, indicators, indicators.Min.Y+indicators.Dy()*3/4, strings.Join(parts, " • "), v.textPx(indicators.Dy()*3/5, indicators), safeInk(panelInk, v.ground(), 4.5))
+	drawTextBoxLeft(fb, indicators, indicators.Min.Y+indicators.Dy()*3/4, strings.Join(parts, " • "), v.textPx(indicators.Dy()*3/5, indicators), safeInk(panelInk, v.ground(), 4.5))
 }
 
 func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
@@ -363,25 +371,30 @@ func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
 		return
 	}
 	fillRect(fb, s.Help, v.ground())
-	if v.Hint == "" {
+	text := v.Hint
+	if v.Options != nil && v.Options.Open {
+		text = "Esc / F1 Return to password"
+	}
+	if text == "" {
 		return
 	}
-	box := s.Help.Inset(max(1, s.Help.Dy()/6))
-	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Hint, v.textPx(14, box), v.muted())
+	box := s.Help.Inset(max(1, int(s.Scale)))
+	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/4, text, v.textPx(int(14*s.Scale), box), v.muted())
 }
 
 func (v *View) drawAmbient(fb *render.Framebuffer, s Scene) {
 	if s.Ambient.Empty() || v.Ambient == "" {
 		return
 	}
-	// The row is a compact ASCII chip: bordered ground box, block battery.
+	// Ambient status belongs to the form footer, sharing its left alignment.
 	fillRect(fb, s.Ambient, v.ground())
-	border(fb, s.Ambient, v.accent(), max(1, int(v.Scale)))
-	box := s.Ambient.Inset(max(2, s.Ambient.Dy()/6))
+	fillRect(fb, image.Rect(s.Ambient.Min.X, s.Ambient.Min.Y, s.Ambient.Max.X, s.Ambient.Min.Y+max(1, int(s.Scale))), safeInk(panelMuted, v.ground(), 3))
+	box := s.Ambient
+	box.Min.Y += max(2, box.Dy()/6)
 	if box.Empty() {
 		return
 	}
-	px := v.textPx(14, box)
+	px := v.textPx(int(14*s.Scale), box)
 	f := face(px)
 	text := strings.Map(func(r rune) rune {
 		if _, ok := f.GlyphAdvance(r); !ok {
@@ -389,26 +402,34 @@ func (v *View) drawAmbient(fb *render.Framebuffer, s Scene) {
 		}
 		return r
 	}, v.Ambient)
-	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, text, px, v.muted())
+	drawTextBoxLeft(fb, box, box.Min.Y+box.Dy()*3/4, text, px, v.muted())
 }
 
-func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p MenuView) {
-	box := s.Menu
+func (v *View) drawPopup(fb *render.Framebuffer, box image.Rectangle, p MenuView, accent color.NRGBA) {
 	if box.Empty() {
 		return
 	}
 	fillRect(fb, box, v.ground())
-	n := max(1, int(v.Scale))
-	border(fb, box, panelDanger, n)
-	lineH := max(n*3, box.Dy()/8)
-	pad := max(n*2, lineH/3)
-	inner := box.Inset(pad + n)
+	scale := v.Scale
+	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
+		scale = 1
+	}
+	scale = min(scale, 4)
+	n := max(1, int(scale))
+	border(fb, box, accent, n)
+	lineH := max(n*3, min(max(1, int(44*scale)), box.Dy()/(len(p.Rows)+3)))
+	pad := max(n*2, int(28*scale)-n)
+	inner := box.Inset(n)
+	inner.Min.X += pad
+	inner.Max.X -= pad
+	inner.Min.Y += max(n, int(12*scale))
+	inner.Max.Y -= max(n, int(12*scale))
 	if inner.Dy() <= 0 || inner.Dx() <= 0 {
 		return
 	}
-	px := v.textPx(18, inner)
+	px := v.textPx(min(int(16*scale), lineH*3/5), inner)
 	y := inner.Min.Y
-	drawTextBox(fb, inner, y+lineH*3/5, p.Title, px, panelDanger)
+	drawTextBox(fb, inner, y+lineH*3/5, p.Title, px, safeInk(accent, v.ground(), 4.5))
 	y += lineH
 	for _, row := range p.Rows {
 		if y+lineH > inner.Max.Y {
@@ -417,37 +438,51 @@ func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p MenuView) {
 		r := image.Rect(inner.Min.X, y, inner.Max.X, y+lineH)
 		ink := v.muted()
 		if row.Selected {
-			fillRect(fb, r, panelDanger)
-			ink = safeInk(v.ground(), panelDanger, 4.5)
+			fillRect(fb, r, accent)
+			ink = safeInk(v.ground(), accent, 4.5)
 		}
-		drawTextBox(fb, r.Inset(px/2), y+lineH*3/5, row.Title, px, ink)
+		r.Min.X += max(1, px/2)
+		r.Max.X -= max(1, px/2)
+		if row.Value == "" {
+			drawTextBox(fb, r, y+lineH*3/4, row.Title, px, ink)
+		} else {
+			label, value := r, r
+			label.Max.X = r.Min.X + r.Dx()/2
+			value.Min.X = label.Max.X
+			text := "< " + row.Value + " >"
+			value.Min.X = max(value.Min.X, value.Max.X-textWidth(px, text)-px)
+			drawTextBoxLeft(fb, label, y+lineH*3/4, row.Title, px, ink)
+			drawTextBoxLeft(fb, value, y+lineH*3/4, text, px, ink)
+		}
 		y += lineH
 	}
-	barH := max(2, lineH/4)
-	helpGap := lineH / 3
-	helpH := 0
-	if p.Help != "" {
-		helpH = lineH
+	if p.Progress >= 0 {
+		barH := max(2, lineH/4)
+		helpH := 0
+		if p.Help != "" {
+			helpH = lineH
+		}
+		barY := max(y, inner.Max.Y-barH-helpH-lineH/3)
+		bar := image.Rect(inner.Min.X, barY, inner.Max.X, barY+barH)
+		border(fb, bar, panelMuted, max(1, barH/3))
+		if p.Progress > 0 {
+			fillRect(fb, image.Rect(bar.Min.X, bar.Min.Y, bar.Min.X+bar.Dx()*min(100, p.Progress)/100, bar.Max.Y), panelDanger)
+		}
+		y = barY + barH + lineH/3
+	} else {
+		y += lineH / 2
 	}
-	barY := inner.Max.Y - barH - helpH - helpGap
-	if barY < y {
-		barY = y
-	}
-	bar := image.Rect(inner.Min.X, barY, inner.Max.X, barY+barH)
-	border(fb, bar, panelMuted, max(1, barH/3))
-	if p.Progress > 0 && bar.Dy() > 0 {
-		fillRect(fb, image.Rect(bar.Min.X, bar.Min.Y, bar.Min.X+bar.Dx()*min(100, p.Progress)/100, bar.Max.Y), panelDanger)
-	}
-	y = barY + barH + helpGap
 	if p.Help != "" && y < inner.Max.Y {
-		drawTextBox(fb, inner, y+lineH/2, p.Help, v.textPx(12, inner), v.muted())
+		drawTextBox(fb, image.Rect(inner.Min.X, y, inner.Max.X, inner.Max.Y), y+lineH/2, p.Help, v.textPx(int(13*scale), inner), v.muted())
 	}
 }
 
 // drawForm renders the greet-style framed form: theme-primary border, the
 // LOCKED rule along the top row, over a solid ground panel.
 func (v *View) drawForm(fb *render.Framebuffer, frame, backing, rule image.Rectangle, scale float64) {
-	if !backing.Empty() {
+	if !frame.Empty() {
+		fillRect(fb, frame, v.ground())
+	} else if !backing.Empty() {
 		fillRect(fb, backing, v.ground())
 	}
 	if frame.Empty() {
@@ -532,6 +567,7 @@ type PowerView = MenuView
 
 type PowerRow struct {
 	Title    string
+	Value    string // optional right-aligned choice for presentation options
 	Selected bool
 }
 
@@ -568,8 +604,14 @@ func (v *View) artInk(c color.NRGBA, minimum float64) color.NRGBA {
 	if relativeLuminance(v.Pal.Surface) > relativeLuminance(worst) {
 		worst = v.Pal.Surface
 	}
-	if relativeLuminance(c) <= relativeLuminance(worst) || contrast(c, worst) < minimum {
-		return panelInk
+	// Brighten toward white to preserve theme tint over the dimmed backdrop.
+	for i := 0; i < 8; i++ {
+		if relativeLuminance(c) > relativeLuminance(worst) && contrast(c, worst) >= minimum {
+			return c
+		}
+		c.R += uint8((255 - int(c.R) + 1) / 2)
+		c.G += uint8((255 - int(c.G) + 1) / 2)
+		c.B += uint8((255 - int(c.B) + 1) / 2)
 	}
-	return c
+	return safeInk(c, worst, minimum)
 }

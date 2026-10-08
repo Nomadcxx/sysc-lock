@@ -401,9 +401,10 @@ func optionsFrame(o *options.Options) *lockd.MenuView {
 	if !o.Open() {
 		return nil
 	}
-	p := &lockd.MenuView{Open: true, Title: "Options", Help: "↑↓ Navigate • ←→ Change • Esc Close", Progress: -1}
-	for i, label := range o.Rows() {
-		p.Rows = append(p.Rows, lockd.PowerRow{Title: label, Selected: i == o.Selected()})
+	p := &lockd.MenuView{Open: true, Title: "────///////OPTIONS///////────", Help: "↑↓ Select row • ←→ Change", Progress: -1}
+	for i, row := range []lockd.PowerRow{{Title: "Background", Value: o.Effect()}, {Title: "Theme", Value: o.Theme()}} {
+		row.Selected = i == o.Selected()
+		p.Rows = append(p.Rows, row)
 	}
 	return p
 }

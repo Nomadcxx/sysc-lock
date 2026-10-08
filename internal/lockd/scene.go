@@ -14,41 +14,35 @@ import (
 type Scene struct {
 	Scale float64
 	Cell  int // clock cell width in pixels; also the jolt step
-	// Logo is the SYSC wordmark header (greet asset). Frame is the greet-style
-	// form border and Rule is the LOCKED rule along its top row; the frame
-	// drops to a bare form before Help when the stack does not fit. Both drop
-	// after the ambient row and the hint strip.
+	// Logo and clock share the form's bounded column. Frame and Rule are
+	// decorative; compact outputs retain credentials and failure feedback.
 	Logo        image.Rectangle
 	Frame, Rule image.Rectangle
 	// Label is the left-aligned field name above the entry row, greet-style;
 	// it survives the decorative frame when the output is compact.
-	Label    image.Rectangle
-	Clock    []string
-	ClockCW  int // 0: the plain style draws text inside ClockBox
-	ClockBox image.Rectangle
-	Date     image.Rectangle
-	DateSize int
+	Label, Identity image.Rectangle
+	Clock           []string
+	ClockCW         int // 0: the plain style draws text inside ClockBox
+	ClockBox        image.Rectangle
+	Date            image.Rectangle
+	DateSize        int
 	// Entry, Indicators and Status are laid out even while the entry is hidden,
 	// so revealing it never moves anything.
 	Entry, Indicators, Status image.Rectangle
 	Attempts, Warning         image.Rectangle
 	Banner                    image.Rectangle
 	Backing                   image.Rectangle
-	// Menu is the Power Options popup, centred over the stack, and Help is the
-	// bottom hint strip. Both are laid out whether or not they are drawn, so
-	// opening the popup never moves anything. Menu is empty only when the
-	// output is too small for it; Help, Frame and Logo are dropped when the
-	// stack would not fit. Ambient is the one-line status row under the frame;
-	// it drops first when the stack would not fit, then Help, then Logo, then
-	// the frame.
-	Menu    image.Rectangle
-	Help    image.Rectangle
-	Ambient image.Rectangle
+	// OptionsMenu replaces the form; Menu is the independent power popup.
+	// Help follows the form and Ambient belongs to its footer. Ambient, help,
+	// logo, frame/identity, date and clock drop in that order on short outputs.
+	Menu, OptionsMenu image.Rectangle
+	Help              image.Rectangle
+	Ambient           image.Rectangle
 }
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
-	return s.Logo.Union(s.Frame).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient).Union(s.Banner)
+	return s.Logo.Union(s.Frame).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient).Union(s.Banner).Union(s.OptionsMenu)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
@@ -62,27 +56,24 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	scale = min(scale, 4)
 	px := func(n int) int { return max(1, int(float64(n)*scale)) }
 	margin := px(8)
-	style, rows, cw := art.Pick(styleName, clockText, width, height)
-	if !style.Plain() {
-		cw = max(art.MinCell, cw*3/4) // greet clock: centered and smaller
-	}
-	s := Scene{Scale: scale, Clock: rows, ClockCW: cw}
-	clockH, clockW, unit := len(rows)*2*cw, art.Width(rows)*cw, cw
+	columnW := min(px(520), max(1, width-2*margin))
+	style, rows, cw := art.Pick(styleName, clockText, columnW*9/10, height)
+	s := Scene{Scale: scale, Clock: rows, ClockCW: cw, Cell: max(px(6), cw)}
+	clockH, clockW := len(rows)*2*cw, art.Width(rows)*cw
 	if style.Plain() {
-		clockH = min(max(px(48), height/8), max(1, height/4))
-		clockW = width * 4 / 5
-		unit = max(px(8), height/60)
+		clockH, clockW = px(36), columnW
 	}
-	s.Cell = max(unit, px(6))
-	logoW, logoH := logoSize(width, height, scale)
-	gap := 2 * unit
-	tight := max(px(4), unit/2) // the header and date hug the clock
-	dateSize := max(px(24), unit*3/2)
-	dateH := dateSize * 3 / 2
-	entryH := max(px(40), unit*3)
-	lineH := px(22)
-	helpH := lineH + unit // gap above the strip plus the strip itself
-	ambientH := lineH
+	logoW := columnW / 2
+	logoH := logoW * art.LogoH / art.LogoW
+	logoGap, clockGap, formGap := px(18), px(10), px(24)
+	dateSize, dateH := px(16), px(24)
+	lineH, entryH := px(20), px(44)
+	padX := min(px(28), max(0, (columnW-px(260))/2))
+	padY, ruleH, innerGap := px(12), lineH, px(12)
+	identityH, identityGap := lineH, px(8)
+	labelH, labelGap := lineH, px(4)
+	ambientH, ambientGap := lineH, px(8)
+	helpH, helpGap := lineH, px(12)
 	attemptH, warningH := 0, 0
 	if len(attempts) > 0 && attempts[0] > 0 {
 		attemptH = lineH
@@ -90,110 +81,128 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	if len(attempts) > 0 && attempts[0] >= 3 {
 		warningH = 2 * lineH
 	}
-	entryW := min(max(1, width-2*px(16)), max(px(260), clockW/2))
-	x := (width - entryW) / 2
-	padX := min(px(14), max(0, x-margin)) // greet form padding, clamped to the margin
-	padY := px(10)
-	innerGap := px(8) // between the rule line and the field
-	ruleH := lineH    // the framed form's title rule row
-	labelH := lineH   // the field-name row inside the frame
-	labelGap := px(4)
-	total := func() int {
-		t := ruleH + innerGap + labelH + labelGap + clockH + tight + dateH + 2*gap + entryH + 2*lineH + 2*padY + ambientH + helpH + attemptH + warningH
-		if logoH > 0 {
-			t += logoH + tight
+	headerH := func() int {
+		h := clockH + dateH
+		if clockH > 0 && dateH > 0 {
+			h += clockGap
 		}
-		return t
+		if logoH > 0 {
+			h += logoH + logoGap
+		}
+		if h > 0 {
+			h += formGap
+		}
+		return h
 	}
-	if total() > height-2*margin && ambientH > 0 {
-		ambientH = 0 // the ambient row drops before anything else
+	formH := func() int {
+		return 2*padY + ruleH + innerGap + identityH + identityGap + labelH + labelGap + entryH + 2*lineH + attemptH + warningH + ambientGap + ambientH
 	}
-	if total() > height-2*margin && helpH > 0 {
-		helpH = 0 // greet chrome drops before the header
-	}
-	if total() > height-2*margin && logoH > 0 {
-		logoH, logoW = 0, 0 // the frame survives longer than the logo
-	}
-	if total() > height-2*margin && ruleH > 0 {
-		// The form drops its frame before it drops the field itself.
-		ruleH, innerGap, padX, padY = 0, 0, 0, 0
-	}
-	// Credentials and failure feedback survive before the clock and date.
+	total := func() int { return headerH() + formH() + helpGap + helpH }
 	if total() > height-2*margin {
-		dateH, tight = 0, 0
+		ambientH, ambientGap = 0, 0
 	}
 	if total() > height-2*margin {
-		clockH, clockW, gap = 0, 0, 0
+		helpH, helpGap = 0, 0
+	}
+	if total() > height-2*margin {
+		logoH, logoW = 0, 0
+	}
+	if total() > height-2*margin {
+		ruleH, innerGap, padX, padY, identityH, identityGap = 0, 0, 0, 0, 0, 0
+	}
+	if total() > height-2*margin {
+		dateH, clockGap = 0, 0
+	}
+	if total() > height-2*margin {
+		clockH, clockW, formGap = 0, 0, 0
 		s.Clock, s.ClockCW = nil, 0
 	}
-	y := max(margin, (height-total())*2/5)
+	// Extra rejection feedback extends downward without moving the field,
+	// unless a compact output needs the space to keep feedback on screen.
+	y := max(margin, min((height-total()+attemptH+warningH)/2, height-margin-(total()-attemptH-warningH+3*lineH)))
 	if logoH > 0 {
 		s.Logo = image.Rect((width-logoW)/2, y, (width+logoW)/2, y+logoH)
-		y += logoH + tight
+		y += logoH + logoGap
 	}
-	s.ClockBox = image.Rect((width-clockW)/2, y, (width+clockW)/2, y+clockH)
-	y += clockH + tight
+	if clockH > 0 {
+		s.ClockBox = image.Rect((width-clockW)/2, y, (width+clockW)/2, y+clockH)
+		y += clockH
+	}
+	if clockH > 0 && dateH > 0 {
+		y += clockGap
+	}
 	if dateH > 0 {
-		s.Date = image.Rect(0, y, width, y+dateH)
+		s.Date = image.Rect((width-columnW)/2, y, (width+columnW)/2, y+dateH)
+		y += dateH
 	}
 	s.DateSize = dateSize
-	y += dateH + 2*gap
+	if headerH() > 0 {
+		y += formGap
+	}
+	formTop := y
+	entryW := columnW - 2*padX
+	x := (width - entryW) / 2
+	y += padY
 	if ruleH > 0 {
 		s.Rule = image.Rect(x, y, x+entryW, y+ruleH)
 		y += ruleH + innerGap
 	}
-	if labelH > 0 {
-		s.Label = image.Rect(x, y, x+entryW, y+labelH)
-		y += labelH + labelGap
+	if identityH > 0 {
+		s.Identity = image.Rect(x, y, x+entryW, y+identityH)
+		y += identityH + identityGap
 	}
+	s.Label = image.Rect(x, y, x+entryW, y+labelH)
+	y += labelH + labelGap
 	s.Entry = image.Rect(x, y, x+entryW, y+entryH)
 	y += entryH
 	s.Indicators = image.Rect(x, y, x+entryW, y+lineH)
-	s.Status = image.Rect(x, y+lineH, x+entryW, y+2*lineH)
-	feedbackY := s.Status.Max.Y
+	y += lineH
+	s.Status = image.Rect(x, y, x+entryW, y+lineH)
+	y += lineH
 	if attemptH > 0 {
-		s.Attempts = image.Rect(x, feedbackY, x+entryW, feedbackY+attemptH)
-		feedbackY += attemptH
+		s.Attempts = image.Rect(x, y, x+entryW, y+attemptH)
+		y += attemptH
 	}
 	if warningH > 0 {
-		s.Warning = image.Rect(x, feedbackY, x+entryW, feedbackY+warningH)
-		feedbackY += warningH
-	}
-	top := s.Entry.Min.Y
-	if labelH > 0 {
-		top = s.Label.Min.Y
-	}
-	if ruleH > 0 {
-		top = s.Rule.Min.Y
-	}
-	s.Backing = image.Rect(x, top, x+entryW, feedbackY)
-	if padX > 0 || padY > 0 {
-		s.Frame = image.Rect(x-padX, s.Backing.Min.Y-padY, x+entryW+padX, feedbackY+padY)
+		s.Warning = image.Rect(x, y, x+entryW, y+warningH)
+		y += warningH
 	}
 	if ambientH > 0 {
-		ambY := feedbackY + padY + px(6)
-		s.Ambient = image.Rect(x, ambY, x+entryW, ambY+lineH)
+		y += ambientGap
+		s.Ambient = image.Rect(x, y, x+entryW, y+ambientH)
+		y += ambientH
+	}
+	s.Backing = image.Rect(x, formTop+padY, x+entryW, y)
+	y += padY
+	if ruleH > 0 {
+		s.Frame = image.Rect(x-padX, formTop, x+entryW+padX, y)
 	}
 	if helpH > 0 {
-		// Greet chrome: the hint sits on the output, not in the clock stack.
-		yHelp := height - margin - lineH
-		s.Help = image.Rect(x, yHelp, x+entryW, yHelp+lineH)
+		s.Help = image.Rect(x, y+helpGap, x+entryW, y+helpGap+helpH)
 	}
-	menuW := min(max(px(320), entryW), max(1, width-2*margin))
+	s.OptionsMenu = image.Rect((width-columnW)/2, formTop, (width+columnW)/2, y)
 	menuH := min(px(260), max(1, height-2*margin))
-	mx := (width - menuW) / 2
-	my := min(s.Entry.Min.Y-(menuH-entryH)/2, height-margin-menuH)
-	s.Menu = image.Rect(mx, max(margin, my), mx+menuW, max(margin, my)+menuH)
+	menuY := max(margin, min(formTop, height-margin-menuH))
+	s.Menu = image.Rect((width-columnW)/2, menuY, (width+columnW)/2, menuY+menuH)
 	return s
 }
 
-// ScreensaverLayout reuses the chosen clock and logo sizing without the form.
+// ScreensaverLayout retains the larger idle clock and wordmark without the form.
 func ScreensaverLayout(width, height int, scale float64, style, text string) Scene {
 	s := Layout(width, height, scale, style, text)
 	gap := max(4, int(8*s.Scale))
 	bannerH := max(16, int(22*s.Scale))
 	logoW, logoH := logoSize(width, height, s.Scale)
-	clockH, clockW := s.ClockBox.Dy(), s.ClockBox.Dx()
+	chosen, rows, cw := art.Pick(style, text, width, height)
+	if !chosen.Plain() {
+		cw = max(art.MinCell, cw*3/4)
+	}
+	s.Clock, s.ClockCW = rows, cw
+	clockH, clockW := len(rows)*2*cw, art.Width(rows)*cw
+	if chosen.Plain() {
+		clockH, clockW = min(max(int(48*s.Scale), height/8), max(1, height/4)), width*4/5
+	}
+	s.DateSize = max(24, int(24*s.Scale))
 	dateH := s.DateSize * 3 / 2
 	total := logoH + clockH + dateH + bannerH + 3*gap
 	if total > height-2*gap {
