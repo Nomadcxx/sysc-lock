@@ -42,7 +42,8 @@ func NewGather() func(time.Time) Snapshot {
 			s.Charging = &charging
 		}
 		s.Link = readLink()
-		s.Media = readMedia()
+		media := readMedia()
+		s.Media, s.Title, s.Artist = media.Media, media.Title, media.Artist
 		if weather != nil {
 			if temp, ok := weather.Get(now); ok {
 				s.Temp = &temp

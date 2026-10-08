@@ -41,8 +41,12 @@ func main() {
 		err = runSession()
 	case len(os.Args) == 2 && os.Args[1] == "--ambient":
 		err = runAmbient()
+	case len(os.Args) == 2 && os.Args[1] == "--preview":
+		err = runPreview(os.Stdin, os.Stdout)
+	case len(os.Args) == 2 && os.Args[1] == "--describe":
+		err = writeDescription(os.Stdout)
 	default:
-		err = fmt.Errorf("usage: sysc-lock [--session|--version|--ambient]")
+		err = fmt.Errorf("usage: sysc-lock [--session|--version|--ambient|--preview|--describe]")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
@@ -101,6 +105,10 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			return
 		}
 		now := time.Now()
+		if wakeScreensaver(view, k, now) {
+			client.Repaint()
+			return
+		}
 		if view.Powering != "" {
 			client.Repaint()
 			return
@@ -354,12 +362,7 @@ func authenticate(a authenticator, pass string, client *lockd.Client, view *lock
 		view.Prompt = ""
 		view.PromptEcho = false
 		model.Clear()
-		switch {
-		case abortErr != nil:
-			view.Reject(abortErr.Error(), time.Now())
-		case err != nil:
-			view.SetError("Authentication unavailable", time.Now())
-		case res.OK:
+		if !showAuthFailure(view, res, err, abortErr, time.Now()) {
 			view.SetError("", time.Now())
 			if err := client.UnlockAndQuit(); err != nil {
 				if errors.Is(err, lockd.ErrUnlockDeferred) {
@@ -368,11 +371,6 @@ func authenticate(a authenticator, pass string, client *lockd.Client, view *lock
 					view.SetErrorTerminal("Unlock confirmation failed", time.Now())
 				}
 			}
-		case res.Terminal:
-			view.SetErrorTerminal(res.Message, time.Now())
-			view.NoteAttempt(time.Now())
-		default:
-			view.Reject(res.Message, time.Now())
 		}
 		client.SetMotionFrozen(false, time.Now())
 		client.Repaint()

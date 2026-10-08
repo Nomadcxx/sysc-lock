@@ -195,6 +195,9 @@ func displayPrompt(msg, def string) string {
 // and never reaches the password buffer. Any key restarts the idle timer. Esc
 // clears the field and hides the entry unless a verification is running.
 func (g *enterGate) press(m *input.Model, r *input.Reveal, k lockd.Key, now time.Time) (bool, error) {
+	if k.Released {
+		return false, nil
+	}
 	visible := g.visible(m, r, now, false)
 	r.Show(now)
 	if !visible {
@@ -236,4 +239,31 @@ func (g *enterGate) accept(generation uint64, phase lockd.Phase) bool {
 // run while the compositor is still deciding, and must not restart.
 func armAmbient(phase lockd.Phase, started bool) bool {
 	return !started && phase == lockd.Locked
+}
+
+func wakeScreensaver(v *lockd.View, k lockd.Key, now time.Time) bool {
+	return !k.Released && v.Activity(now)
+}
+
+// showAuthFailure keeps presentation accounting separate from unlock authority.
+// false means a completed successful transaction; only the owner may unlock.
+func showAuthFailure(v *lockd.View, res auth.Result, err, abort error, now time.Time) bool {
+	switch {
+	case abort != nil:
+		v.SetError(abort.Error(), now)
+	case err != nil:
+		v.SetError("Authentication unavailable", now)
+	case res.OK:
+		return false
+	case res.Terminal:
+		v.SetErrorTerminal(res.Message, now)
+		if res.Rejected {
+			v.NoteAttempt(now)
+		}
+	case res.Rejected:
+		v.Reject(res.Message, now)
+	default:
+		v.SetError(res.Message, now)
+	}
+	return true
 }

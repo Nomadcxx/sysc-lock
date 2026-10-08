@@ -56,6 +56,8 @@ type View struct {
 	printStart time.Time
 	joltStart  time.Time
 	logoScaled *image.NRGBA
+	idleSince  time.Time
+	idleMode   bool
 }
 
 func NewView(pal theme.Palette, user, host string) *View {
@@ -86,8 +88,37 @@ func (v *View) Reject(msg string, now time.Time) {
 // EntryVisible reports whether the entry is shown at now. Text in the field or
 // a running verification keeps it up.
 func (v *View) EntryVisible(now time.Time) bool {
-	open := v.Power != nil && v.Power.Open
+	open := (v.Power != nil && v.Power.Open) || (v.Options != nil && v.Options.Open)
 	return v.Reveal.Tick(now, v.Busy || v.Powering != "" || open || (v.Entry != nil && len(v.Entry.Pass) > 0))
+}
+
+// Screensaver reports the five-minute idle mode. The foreground owner calls it;
+// credentials, active dialogs and terminal failures remain at the prompt.
+func (v *View) Screensaver(now time.Time) bool {
+	if v.idleSince.IsZero() || v.Busy || v.Powering != "" || v.Terminal() ||
+		(v.Power != nil && v.Power.Open) || (v.Options != nil && v.Options.Open) ||
+		(v.Entry != nil && len(v.Entry.Pass) > 0) {
+		v.idleSince = now
+	}
+	idle := !now.Before(v.idleSince.Add(5 * time.Minute))
+	if idle && !v.idleMode {
+		v.printStart = now
+	}
+	v.idleMode = idle
+	return idle
+}
+
+// Activity consumes the wake press before any key can edit, paste or submit.
+// Releases are filtered by the input owner and never reach this method.
+func (v *View) Activity(now time.Time) bool {
+	wake := v.Screensaver(now)
+	v.idleSince = now
+	v.idleMode = false
+	if wake {
+		v.Reveal.Show(now)
+		v.printStart = now
+	}
+	return wake
 }
 
 // StatusLine is the visible error text at now (empty after the 4s window).
@@ -96,7 +127,7 @@ func (v *View) StatusLine(now time.Time) string {
 		return v.Powering
 	}
 	if v.Busy {
-		return "Checking…"
+		return "Authenticating..."
 	}
 	if v.errMsg == "" {
 		return ""
@@ -127,7 +158,14 @@ func (v *View) NextDeadline(now time.Time) time.Time {
 	if !v.errTerm && v.errMsg != "" {
 		consider(v.errUntil)
 	}
-	consider(v.Reveal.Deadline())
+	screensaver := v.Screensaver(now)
+	if !screensaver {
+		consider(v.idleSince.Add(5 * time.Minute))
+		consider(v.Reveal.Deadline())
+	}
+	if !screensaver && !v.Reduced && v.EntryVisible(now) && !v.Busy && v.Powering == "" {
+		consider(now.Truncate(500 * time.Millisecond).Add(500 * time.Millisecond))
+	}
 	if !v.Reduced {
 		if !v.printStart.IsZero() && now.Sub(v.printStart) < art.PrintDuration {
 			consider(now.Add(33 * time.Millisecond))
@@ -148,13 +186,13 @@ func (v *View) Render(fb *render.Framebuffer, now time.Time) {
 	v.RenderForeground(fb, now)
 }
 
-// DimBackground halves red, green and blue so the art ink keeps 3:1 contrast
-// over the brightest effect pixel. Alpha is untouched.
+// DimBackground caps effect luminance so contrast-safe theme ink remains legible.
+// Alpha is untouched.
 func DimBackground(pix []byte) {
 	for i := 0; i+3 < len(pix); i += 4 {
-		pix[i] /= 2
-		pix[i+1] /= 2
-		pix[i+2] /= 2
+		pix[i] /= 3
+		pix[i+1] /= 3
+		pix[i+2] /= 3
 	}
 }
 
@@ -199,9 +237,16 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 		v.printStart = now // the first foreground frame starts the print reveal
 	}
 	text := v.clockText(now)
-	s := Layout(fb.Width, fb.Height, v.Scale, v.StyleName, text)
+	screensaver := v.Screensaver(now)
+	s := Layout(fb.Width, fb.Height, v.Scale, v.StyleName, text, v.Attempts)
+	if screensaver {
+		s = ScreensaverLayout(fb.Width, fb.Height, v.Scale, v.StyleName, text)
+	}
 	clockLimit, done := v.printLimits(now, s)
-	v.drawLogo(fb, s.Logo, v.banner())
+	v.drawLogo(fb, s.Logo, v.artInk(v.banner(), 3))
+	if screensaver {
+		drawTextBox(fb, s.Banner, s.Banner.Min.Y+s.Banner.Dy()*3/4, "// SEE YOU SPACE COWBOY //", v.textPx(s.Banner.Dy()*3/5, s.Banner), v.artInk(v.banner(), 4.5))
+	}
 	if s.ClockCW > 0 {
 		for _, r := range art.Rects(s.Clock, s.ClockBox.Min, s.ClockCW, 2*s.ClockCW, clockLimit) {
 			fillRect(fb, r, v.clockInk())
@@ -211,7 +256,15 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 		drawTextBox(fb, s.ClockBox, s.ClockBox.Min.Y+s.ClockBox.Dy()*4/5, text, size, v.clockInk())
 	}
 	if done {
-		drawTextBox(fb, s.Date, s.Date.Min.Y+s.DateSize, strings.ToUpper(now.Format("Monday, January 2")), v.textPx(s.DateSize, s.Date), v.dateInk())
+		px := v.textPx(s.DateSize, s.Date)
+		date := strings.ToUpper(now.Format("Monday, January 2, 2006"))
+		if textWidth(px, date) > s.Date.Dx() {
+			date = strings.ToUpper(now.Format("Mon, 02 Jan 2006"))
+		}
+		drawTextBox(fb, s.Date, s.Date.Min.Y+s.DateSize, date, px, v.dateInk())
+	}
+	if screensaver {
+		return
 	}
 	visible := v.EntryVisible(now)
 	status := v.StatusLine(now)
@@ -223,12 +276,23 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 		v.drawEntry(fb, shift(s.Entry), shift(s.Indicators), s.Scale, now)
 	}
 	if status != "" {
-		ink := panelDanger
+		ink := safeInk(panelDanger, v.ground(), 4.5)
 		if v.Busy {
-			ink = panelInk
+			ink = safeInk(panelInk, v.ground(), 4.5)
 		}
 		line := shift(s.Status)
 		drawTextBox(fb, line, line.Min.Y+line.Dy()*3/4, status, v.textPx(line.Dy()*3/5, line), ink)
+	}
+	if !s.Attempts.Empty() {
+		attempts := shift(s.Attempts)
+		drawTextBox(fb, attempts, attempts.Min.Y+attempts.Dy()*3/4, "Failed attempts: "+itoa(v.Attempts), v.textPx(s.Attempts.Dy()*3/5, s.Attempts), v.muted())
+	}
+	if !s.Warning.Empty() {
+		for i, text := range []string{"WARNING: Failures may", "lock your account"} {
+			warning := shift(s.Warning)
+			box := image.Rect(warning.Min.X, warning.Min.Y+i*warning.Dy()/2, warning.Max.X, warning.Min.Y+(i+1)*warning.Dy()/2)
+			drawTextBox(fb, box, box.Min.Y+box.Dy()*3/4, text, v.textPx(min(12, int(12*s.Scale)), box), safeInk(panelDanger, v.ground(), 4.5))
+		}
 	}
 	// The guidance and status rows stay on screen at all times, greet-style.
 	v.drawAmbient(fb, s)
@@ -262,17 +326,17 @@ func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectang
 	cy := entry.Min.Y + (entry.Dy()-sq)/2
 	cursorX := inner.Min.X
 	if v.Entry == nil || len(v.Entry.Pass) == 0 {
-		drawTextBox(fb, inner, entry.Min.Y+entry.Dy()*2/3, "PASSWORD", v.textPx(entry.Dy()/2, inner), panelInk)
+		drawTextBox(fb, inner, entry.Min.Y+entry.Dy()*2/3, "PASSWORD", v.textPx(entry.Dy()/2, inner), safeInk(panelInk, v.ground(), 4.5))
 	} else if v.PromptEcho {
 		text := string(v.Entry.Pass)
 		px := v.textPx(entry.Dy()/2, inner)
-		drawTextBoxLeft(fb, inner, entry.Min.Y+entry.Dy()*2/3, text, px, panelInk)
+		drawTextBoxLeft(fb, inner, entry.Min.Y+entry.Dy()*2/3, text, px, safeInk(panelInk, v.ground(), 4.5))
 		cursorX = inner.Min.X + min(textWidth(px, text), max(0, inner.Dx()-sq))
 	} else {
 		step := sq * 3 / 2
 		n := min(len(v.Entry.Pass), max(1, inner.Dx()/step))
 		for i := 0; i < n; i++ {
-			fillRect(fb, image.Rect(inner.Min.X+i*step, cy, inner.Min.X+i*step+sq, cy+sq), panelInk)
+			fillRect(fb, image.Rect(inner.Min.X+i*step, cy, inner.Min.X+i*step+sq, cy+sq), safeInk(panelInk, v.ground(), 4.5))
 		}
 		cursorX = inner.Min.X + n*step
 	}
@@ -282,7 +346,7 @@ func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectang
 	}
 	parts := []string{}
 	if v.Caps {
-		parts = append(parts, "Caps Lock")
+		parts = append(parts, "CAPS LOCK ON")
 	}
 	if v.Num {
 		parts = append(parts, "Num Lock")
@@ -291,7 +355,7 @@ func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectang
 	if v.Layout != "" {
 		parts = append(parts, v.Layout)
 	}
-	drawTextBox(fb, indicators, indicators.Min.Y+indicators.Dy()*3/4, strings.Join(parts, " • "), v.textPx(indicators.Dy()*3/5, indicators), panelInk)
+	drawTextBox(fb, indicators, indicators.Min.Y+indicators.Dy()*3/4, strings.Join(parts, " • "), v.textPx(indicators.Dy()*3/5, indicators), safeInk(panelInk, v.ground(), 4.5))
 }
 
 func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
@@ -303,7 +367,7 @@ func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
 		return
 	}
 	box := s.Help.Inset(max(1, s.Help.Dy()/6))
-	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Hint, v.textPx(14, box), panelMuted)
+	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Hint, v.textPx(14, box), v.muted())
 }
 
 func (v *View) drawAmbient(fb *render.Framebuffer, s Scene) {
@@ -317,7 +381,15 @@ func (v *View) drawAmbient(fb *render.Framebuffer, s Scene) {
 	if box.Empty() {
 		return
 	}
-	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, v.Ambient, v.textPx(14, box), panelMuted)
+	px := v.textPx(14, box)
+	f := face(px)
+	text := strings.Map(func(r rune) rune {
+		if _, ok := f.GlyphAdvance(r); !ok {
+			return '?'
+		}
+		return r
+	}, v.Ambient)
+	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/5, text, px, v.muted())
 }
 
 func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p MenuView) {
@@ -343,10 +415,10 @@ func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p MenuView) {
 			break
 		}
 		r := image.Rect(inner.Min.X, y, inner.Max.X, y+lineH)
-		ink := panelMuted
+		ink := v.muted()
 		if row.Selected {
 			fillRect(fb, r, panelDanger)
-			ink = v.ground()
+			ink = safeInk(v.ground(), panelDanger, 4.5)
 		}
 		drawTextBox(fb, r.Inset(px/2), y+lineH*3/5, row.Title, px, ink)
 		y += lineH
@@ -368,7 +440,7 @@ func (v *View) drawPopup(fb *render.Framebuffer, s Scene, p MenuView) {
 	}
 	y = barY + barH + helpGap
 	if p.Help != "" && y < inner.Max.Y {
-		drawTextBox(fb, inner, y+lineH/2, p.Help, v.textPx(12, inner), panelMuted)
+		drawTextBox(fb, inner, y+lineH/2, p.Help, v.textPx(12, inner), v.muted())
 	}
 }
 
@@ -428,10 +500,10 @@ func role(c, fallback color.NRGBA) color.NRGBA {
 	return c
 }
 func (v *View) ground() color.NRGBA   { return role(v.Pal.Ground, panelGround) }
-func (v *View) banner() color.NRGBA   { return role(v.Pal.Banner, panelAccent) }
-func (v *View) accent() color.NRGBA   { return role(v.Pal.Accent, panelAccent) }
-func (v *View) clockInk() color.NRGBA { return role(v.Pal.ClockInk, panelInk) }
-func (v *View) dateInk() color.NRGBA  { return role(v.Pal.DateInk, panelInk) }
+func (v *View) banner() color.NRGBA   { return safeInk(role(v.Pal.Banner, panelAccent), v.ground(), 4.5) }
+func (v *View) accent() color.NRGBA   { return safeInk(role(v.Pal.Accent, panelAccent), v.ground(), 4.5) }
+func (v *View) clockInk() color.NRGBA { return v.artInk(role(v.Pal.ClockInk, panelInk), 3) }
+func (v *View) dateInk() color.NRGBA  { return v.artInk(role(v.Pal.DateInk, panelInk), 4.5) }
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
@@ -461,4 +533,43 @@ type PowerView = MenuView
 type PowerRow struct {
 	Title    string
 	Selected bool
+}
+
+// safeInk retains theme colors that meet the actual background contrast floor.
+func safeInk(ink, ground color.NRGBA, minimum float64) color.NRGBA {
+	if contrast(ink, ground) >= minimum {
+		return ink
+	}
+	white, black := panelInk, color.NRGBA{A: 255}
+	if contrast(white, ground) >= contrast(black, ground) {
+		return white
+	}
+	return black
+}
+func contrast(a, b color.NRGBA) float64 {
+	x, y := relativeLuminance(a), relativeLuminance(b)
+	return (max(x, y) + .05) / (min(x, y) + .05)
+}
+func relativeLuminance(c color.NRGBA) float64 {
+	linear := func(v uint8) float64 {
+		x := float64(v) / 255
+		if x <= .04045 {
+			return x / 12.92
+		}
+		return math.Pow((x+.055)/1.055, 2.4)
+	}
+	return .2126*linear(c.R) + .7152*linear(c.G) + .0722*linear(c.B)
+}
+func (v *View) muted() color.NRGBA { return safeInk(panelMuted, v.ground(), 4.5) }
+func (v *View) artInk(c color.NRGBA, minimum float64) color.NRGBA {
+	// Effects/blur are dimmed to <=85 per channel. Use the brighter of that
+	// ceiling and the plain theme background, covering every supported pixel.
+	worst := color.NRGBA{R: 85, G: 85, B: 85, A: 255}
+	if relativeLuminance(v.Pal.Surface) > relativeLuminance(worst) {
+		worst = v.Pal.Surface
+	}
+	if relativeLuminance(c) <= relativeLuminance(worst) || contrast(c, worst) < minimum {
+		return panelInk
+	}
+	return c
 }

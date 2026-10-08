@@ -71,11 +71,14 @@ and the guided installer runs exactly its steps.
     sysc-lock                    # requests the registered session owner and waits
     sysc-lock --session          # persistent owner, started by the user unit
     sysc-lock --ambient          # collector child; the owner starts it, not users
+    sysc-lock --describe         # JSON presentation choices and defaults
     sysc-lock --version
 
 While the password entry is revealed, the owner may show one ambient row
-(battery, link, playing, temperature) read from the collector's snapshot file;
+(battery, link, playing track title/artist, temperature) read from the collector's snapshot file;
 it is a read-only hint, never an unlock path.
+Paused or stopped players hide track metadata. Long titles fit the row before
+artists; unsupported font glyphs display as `?`.
 
 The service requires Niri's startup environment: XDG_SESSION_ID, NIRI_SOCKET,
 WAYLAND_DISPLAY and XDG_RUNTIME_DIR. Registration verifies the real UID,
@@ -109,6 +112,12 @@ EGL and GLES2 development headers; the linker flags are in the package.
 Exporting GPU buffers to the compositor (dmabuf) is a later phase, not this.
 The screen shows the clock until a key is pressed; that key only reveals the
 password entry. The entry hides again after 8 seconds when empty, or on Esc.
+After five minutes without input, the form gives way to the logo, banner,
+clock and date. The first key returns to the prompt without entering or
+submitting anything. Credentials, authentication and open menus keep the prompt
+visible. Failed credential checks show a count and, from the third rejection,
+an account-lockout warning; account-policy and infrastructure errors do not
+increase that count.
 Ctrl+V or Shift+Insert pastes the seat selection into the field when the
 compositor offers `text/plain` (bounded to 4096 bytes); a compositor without a
 data device stays keys-only. `power_actions` is the ordered Power Options menu; unknown names
@@ -121,7 +130,16 @@ menu, so it never offers a dead row. A refused call shows `Not permitted` and
 typing works again.
 
 Shell Settings → Lock Screen edits this file and provides a labeled ordinary
-preview. Apply affects the next lock. The shared renderer comes from the pinned
+still preview rendered by the installed locker. Apply affects the next lock.
+`sysc-lock --preview` reads a bounded JSON object from stdin and writes a PNG to
+stdout, using sample identity and status. It does not lock, authenticate or write
+configuration. For example:
+
+```sh
+printf '%s' '{"config":{"effect":"none","palette":"nord"},"width":960,"height":540}' | sysc-lock --preview > preview.png
+```
+
+The shared renderer comes from the pinned
 sysc-terminal revision; wallpaper/invalid-effect failures use an opaque fallback.
 `SYSC_LOCK_PALETTE` supplies the foreground palette. `SYSC_LOCK_WALLPAPER`
 selects a static PNG/JPEG instead of the effect. The worker decodes it once per

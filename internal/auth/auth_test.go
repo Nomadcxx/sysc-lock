@@ -174,3 +174,38 @@ func TestPamConversationWithoutResponderFailsClosed(t *testing.T) {
 		t.Fatal("secret without responder must fail closed")
 	}
 }
+
+func TestPAMAttemptsClassifyCredentialRejectionByStage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		stage    int
+		failure  error
+		rejected bool
+	}{
+		{"bad secret", 0, pam.ErrAuth, true}, {"max retries", 0, pam.ErrMaxtries, true},
+		{"unavailable", 0, pam.ErrAuthinfoUnavail, false}, {"system", 0, pam.ErrSystem, false},
+		{"account auth result", 1, pam.ErrAuth, false}, {"account max retries", 1, pam.ErrMaxtries, false},
+		{"denied", 1, pam.ErrPermDenied, false}, {"expired", 1, pam.ErrAcctExpired, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var conversation error
+			stage := 0
+			check := func(pam.Flags) error {
+				defer func() { stage++ }()
+				if stage == tc.stage {
+					return tc.failure
+				}
+				return nil
+			}
+			r := verifyTransaction(check, check, &conversation)
+			if r.OK || r.Rejected != tc.rejected {
+				t.Fatalf("result=%+v", r)
+			}
+		})
+	}
+	var failure = errors.New("conversation failure")
+	success := func(pam.Flags) error { return nil }
+	if r := verifyTransaction(success, success, &failure); r.OK || r.Rejected {
+		t.Fatalf("conversation counted: %+v", r)
+	}
+}

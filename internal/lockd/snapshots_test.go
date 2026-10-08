@@ -171,9 +171,9 @@ func TestOfflineViewSnapshots(t *testing.T) {
 		})
 	}
 	evidence := fmt.Sprintf("Offline raster evidence only; no lock/PAM/session qualification.\nShared renderer: github.com/Nomadcxx/sysc-terminal v0.0.0-20261004174459-4e522749ac8b, rain/nord, 20 steps.\nFake account: Sample Account. Fixed UTC clock: 2026-10-05 21:47.\n960x720 and compact 320x240, scale 1. Reduced-motion sample uses the approved solid fallback.\nOpaque foreground role WCAG luminance ratios against panel #10141c:\ntext #f0f4fa %.2f:1 (minimum 4.5)\nstatus #ffb4b4 %.2f:1 (minimum 4.5)\ncontrol/focus #93c5fd %.2f:1 (minimum 3)\nhelp/muted #828a96 %.2f:1 (minimum 4.5)\nGlyph edge antialiasing is excluded from WCAG role contrast.\n", panelContrast(panelInk), panelContrast(panelDanger), panelContrast(panelAccent), panelContrast(panelMuted))
-	worst := color.NRGBA{R: 127, G: 127, B: 127, A: 255}
+	worst := color.NRGBA{R: 85, G: 85, B: 85, A: 255}
 	artRatio := (max(luminance(panelInk), luminance(worst)) + .05) / (min(luminance(panelInk), luminance(worst)) + .05)
-	evidence += fmt.Sprintf("Clock-forward composition, 12-hour clock. Art ink over the brightest dimmed effect pixel (white halved): %.2f:1 (minimum 3).\n", artRatio)
+	evidence += fmt.Sprintf("Clock-forward composition, 12-hour clock. Art ink over the brightest dimmed effect pixel (white reduced to one third): %.2f:1 (minimum 3).\n", artRatio)
 	if err := os.WriteFile(filepath.Join(dir, "offline-render-evidence.txt"), []byte(evidence), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -181,10 +181,61 @@ func TestOfflineViewSnapshots(t *testing.T) {
 
 func TestArtInkReadsOverTheBrightestDimmedEffect(t *testing.T) {
 	// Clock, date and wordmark sit on the dimmed effect without a backing; the
-	// brightest dimmed pixel is white halved.
-	worst := color.NRGBA{R: 127, G: 127, B: 127, A: 255}
+	// brightest dimmed pixel is white reduced to one third.
+	worst := color.NRGBA{R: 85, G: 85, B: 85, A: 255}
 	a, b := luminance(panelInk), luminance(worst)
 	if ratio := (max(a, b) + .05) / (min(a, b) + .05); ratio < 3 {
 		t.Fatalf("art ink %.2f:1 below the 3:1 large-text floor", ratio)
+	}
+}
+
+// Synthetic parity proof: fixed identity, clock and collector text; no desktop capture.
+func TestOfflineParitySnapshots(t *testing.T) {
+	dir := os.Getenv("SYSC_LOCK_TEST_SNAPSHOT_DIR")
+	if dir == "" {
+		t.Skip("set SYSC_LOCK_TEST_SNAPSHOT_DIR for synthetic parity images")
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		scheme, state string
+		w, h          int
+	}{
+		{"eldritch", "prompt", 960, 720}, {"nord", "prompt", 960, 720},
+		{"rama", "warning", 960, 720}, {"rama", "warning", 320, 240},
+		{"eldritch", "screensaver", 960, 720}, {"eldritch", "screensaver", 320, 240},
+	} {
+		t.Run(fmt.Sprintf("%s-%s-%dx%d", tc.scheme, tc.state, tc.w, tc.h), func(t *testing.T) {
+			now := time.Date(2026, 10, 8, 12, 34, 56, 0, time.UTC)
+			v := NewView(theme.Default().WithScheme(tc.scheme), "Sample Account", "example")
+			v.Reduced = true
+			v.Entry = &input.Model{}
+			v.Caps = true
+			v.Layout = "us"
+			v.Hint = "F1 Options | Enter Unlock"
+			v.Ambient = "[#####.....] 53% | Wi-Fi | playing"
+			v.Reveal.Show(now)
+			fb := render.New(tc.w, tc.h)
+			v.Render(fb, now)
+			if tc.state == "warning" {
+				for i := 0; i < 3; i++ {
+					v.Reject("Incorrect password", now)
+				}
+			}
+			if tc.state == "screensaver" {
+				now = now.Add(5 * time.Minute)
+			}
+			v.Render(fb, now)
+			file, err := os.OpenFile(filepath.Join(dir, fmt.Sprintf("parity-%s-%s-%dx%d.png", tc.scheme, tc.state, tc.w, tc.h)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encodeErr := png.Encode(file, fb)
+			closeErr := file.Close()
+			if encodeErr != nil || closeErr != nil {
+				t.Fatal(encodeErr, closeErr)
+			}
+		})
 	}
 }

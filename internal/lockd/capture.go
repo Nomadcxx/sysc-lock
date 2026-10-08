@@ -20,13 +20,20 @@ const (
 // is free.
 func (out *lockOut) upscaleBackdrop(dst []byte) {
 	src := out.backdrop
+	rowBytes, previous := out.w*4, -1
 	for y := 0; y < out.h; y++ {
 		sy := y * src.Height / out.h
+		// Nearest-neighbour repeats rows; copy the row we already expanded.
+		if sy == previous {
+			copy(dst[y*rowBytes:(y+1)*rowBytes], dst[(y-1)*rowBytes:y*rowBytes])
+			continue
+		}
 		for x := 0; x < out.w; x++ {
 			s := sy*src.Stride + (x*src.Width/out.w)*4
 			d := (y*out.w + x) * 4
 			copy(dst[d:d+4], src.Pix[s:s+4])
 		}
+		previous = sy
 	}
 }
 

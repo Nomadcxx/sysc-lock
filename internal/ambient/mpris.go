@@ -3,6 +3,7 @@ package ambient
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,14 +16,19 @@ const mprisPrefix = "org.mpris.MediaPlayer2."
 type Bus interface {
 	Names() []string
 	PlaybackStatus(dest string) (string, error)
+	Metadata(dest string) (map[string]dbus.Variant, error)
 }
 
-// ReadMedia returns Playing if any MPRIS player is playing, else the first
-// Paused or Stopped status seen, else "". Names that fail to answer are
-// skipped so one broken player cannot hide a playing one.
-func ReadMedia(b Bus) string {
-	fallback := ""
-	for _, name := range b.Names() {
+// ReadMedia preserves the status-only collector entry point.
+func ReadMedia(b Bus) string { return ReadNowPlaying(b).Media }
+
+// ReadNowPlaying selects the first playing player in sorted bus-name order.
+// Status survives missing/malformed metadata; no fields come from another player.
+func ReadNowPlaying(b Bus) Snapshot {
+	result := Snapshot{}
+	names := slices.Clone(b.Names())
+	slices.Sort(names)
+	for _, name := range names {
 		if !strings.HasPrefix(name, mprisPrefix) {
 			continue
 		}
@@ -32,39 +38,61 @@ func ReadMedia(b Bus) string {
 		}
 		switch status {
 		case "Playing":
-			return Playing
+			result.Media = Playing
+			metadata, err := b.Metadata(name)
+			if err != nil {
+				return result
+			}
+			if title, ok := metadata["xesam:title"].Value().(string); ok {
+				result.Title = cleanMetadata(title)
+			}
+			if artists, ok := metadata["xesam:artist"].Value().([]string); ok {
+				for _, artist := range artists {
+					artist = cleanMetadata(artist)
+					if artist == "" {
+						continue
+					}
+					if result.Artist != "" {
+						result.Artist += ", "
+					}
+					result.Artist = cleanMetadata(result.Artist + artist)
+					if len([]rune(result.Artist)) == 128 {
+						break
+					}
+				}
+			}
+			return result
 		case "Paused":
-			if fallback == "" {
-				fallback = Paused
+			if result.Media == "" {
+				result.Media = Paused
 			}
 		case "Stopped":
-			if fallback == "" {
-				fallback = Stopped
+			if result.Media == "" {
+				result.Media = Stopped
 			}
 		}
 	}
-	return fallback
+	return result
 }
 
 // dbusBus is Bus over a private session-bus connection.
-type dbusBus struct{ conn *dbus.Conn }
+type dbusBus struct {
+	conn *dbus.Conn
+	ctx  context.Context
+}
 
 func (b dbusBus) Names() []string {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
 	var names []string
-	if err := b.conn.BusObject().CallWithContext(ctx, "org.freedesktop.DBus.ListNames", 0).Store(&names); err != nil {
+	if err := b.conn.BusObject().CallWithContext(b.ctx, "org.freedesktop.DBus.ListNames", 0).Store(&names); err != nil {
 		return nil
 	}
 	return names
 }
 
 func (b dbusBus) PlaybackStatus(dest string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
 	var v dbus.Variant
 	err := b.conn.Object(dest, dbus.ObjectPath("/org/mpris/MediaPlayer2")).CallWithContext(
-		ctx, "org.freedesktop.DBus.Properties.Get", 0,
+		b.ctx, "org.freedesktop.DBus.Properties.Get", 0,
 		"org.mpris.MediaPlayer2.Player", "PlaybackStatus").Store(&v)
 	if err != nil {
 		return "", err
@@ -76,13 +104,31 @@ func (b dbusBus) PlaybackStatus(dest string) (string, error) {
 	return s, nil
 }
 
+func (b dbusBus) Metadata(dest string) (map[string]dbus.Variant, error) {
+	var v dbus.Variant
+	err := b.conn.Object(dest, dbus.ObjectPath("/org/mpris/MediaPlayer2")).CallWithContext(
+		b.ctx, "org.freedesktop.DBus.Properties.Get", 0,
+		"org.mpris.MediaPlayer2.Player", "Metadata").Store(&v)
+	if err != nil {
+		return nil, err
+	}
+	metadata, ok := v.Value().(map[string]dbus.Variant)
+	if !ok {
+		return nil, fmt.Errorf("Metadata not a property map: %T", v.Value())
+	}
+	return metadata, nil
+}
+
 // readMedia polls the session bus once. A fresh private connection per tick
 // keeps no state across polls and dies with the child process.
-func readMedia() string {
-	conn, err := dbus.ConnectSessionBus()
+func readMedia() Snapshot {
+	// Leave room for battery/link publication within the one-second cadence.
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+	conn, err := dbus.ConnectSessionBus(dbus.WithContext(ctx))
 	if err != nil {
-		return ""
+		return Snapshot{}
 	}
 	defer conn.Close()
-	return ReadMedia(dbusBus{conn})
+	return ReadNowPlaying(dbusBus{conn, ctx})
 }

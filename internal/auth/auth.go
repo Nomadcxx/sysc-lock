@@ -19,6 +19,7 @@ import (
 type Result struct {
 	OK       bool
 	Message  string
+	Rejected bool // credential rejection in the authenticate stage, never an account/infrastructure failure
 	Terminal bool // further attempts are futile (perm denied, expired, maxtries)
 }
 
@@ -87,14 +88,16 @@ func (p *PAM) Verify(user string, response PromptFunc) (Result, error) {
 
 // verifyTransaction also checks the conversation outcome; modules own PAM stages.
 func verifyTransaction(authenticate, acctMgmt func(pam.Flags) error, conversationErr *error) Result {
-	for _, check := range []func(pam.Flags) error{authenticate, acctMgmt} {
+	for stage, check := range []func(pam.Flags) error{authenticate, acctMgmt} {
 		err := check(0)
 		// PAM modules can ignore callback failures; they never authorize unlock.
 		if *conversationErr != nil {
 			return Result{Message: "Authentication failed"}
 		}
 		if err != nil {
-			return mapPamError(err)
+			result := mapPamError(err)
+			result.Rejected = stage == 0 && result.Rejected
+			return result
 		}
 	}
 	return Result{OK: true}
@@ -143,9 +146,9 @@ func mapPamError(err error) Result {
 	if errors.As(err, &pe) {
 		switch pe {
 		case pam.ErrAuth:
-			return Result{OK: false, Message: "Incorrect password"}
+			return Result{OK: false, Rejected: true, Message: "Incorrect password"}
 		case pam.ErrMaxtries:
-			return Result{OK: false, Terminal: true, Message: "Too many attempts - locked out"}
+			return Result{OK: false, Rejected: true, Terminal: true, Message: "Too many attempts - locked out"}
 		case pam.ErrPermDenied:
 			return Result{OK: false, Terminal: true, Message: "Permission denied"}
 		case pam.ErrAcctExpired:

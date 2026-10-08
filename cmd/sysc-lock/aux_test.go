@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"github.com/Nomadcxx/sysc-lock/internal/ambient"
+	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
 	"github.com/Nomadcxx/sysc-lock/internal/power"
+	"github.com/Nomadcxx/sysc-lock/internal/theme"
 	"os"
 	"os/exec"
 	"os/user"
@@ -484,5 +487,71 @@ func TestDisplayPromptSanitizes(t *testing.T) {
 	}
 	if got := displayPrompt("   ", "Enter code"); got != "Enter code" {
 		t.Fatalf("fallback %q", got)
+	}
+}
+
+func TestParityReleasedKeyDoesNotWakeHiddenEntry(t *testing.T) {
+	now := time.Unix(600, 0)
+	var r input.Reveal
+	g := &enterGate{}
+	m := &input.Model{}
+	submit, err := g.press(m, &r, lockd.Key{Enter: true, Released: true}, now)
+	if submit || err != nil || r.Tick(now, false) {
+		t.Fatal("key release woke the entry")
+	}
+}
+
+func TestParityScreensaverWakeConsumesEveryPressBeforeEntry(t *testing.T) {
+	now := time.Unix(600, 0)
+	for _, k := range []lockd.Key{{Text: "x"}, {Enter: true}, {F1: true}, {F4: true}, {Ctrl: true, Text: "v"}, {Shift: true, Insert: true}, {Escape: true}, {Enter: true, Released: true}} {
+		v := lockd.NewView(theme.Default(), "u", "h")
+		m := &input.Model{}
+		v.Entry = m
+		v.Screensaver(now)
+		g := &enterGate{paste: func() string { t.Fatal("wake key read clipboard"); return "" }}
+		later := now.Add(5 * time.Minute)
+		wake := wakeScreensaver(v, k, later)
+		if !wake {
+			g.press(m, &v.Reveal, k, later)
+		}
+		if g.busy || len(m.Pass) > 0 {
+			t.Fatalf("wake accepted credential or submit: %+v", k)
+		}
+		if k.Released {
+			if wake || !v.Screensaver(later) {
+				t.Fatal("release dismissed screensaver")
+			}
+		} else if !wake || v.Screensaver(later) || !v.EntryVisible(later) {
+			t.Fatalf("press did not restore prompt: %+v", k)
+		}
+	}
+}
+
+func TestParityOnlyCredentialRejectionsIncreaseAttempts(t *testing.T) {
+	now := time.Unix(600, 0)
+	for _, tc := range []struct {
+		name              string
+		result            auth.Result
+		err, abort        error
+		count             int
+		terminal, handled bool
+	}{
+		{name: "bad secret", result: auth.Result{Rejected: true, Message: "Incorrect password"}, count: 1, handled: true},
+		{name: "max retries", result: auth.Result{Rejected: true, Terminal: true, Message: "Too many attempts - locked out"}, count: 1, terminal: true, handled: true},
+		{name: "account restricted", result: auth.Result{Terminal: true, Message: "Account expired"}, terminal: true, handled: true},
+		{name: "PAM module unavailable", result: auth.Result{Message: "Authentication unavailable"}, handled: true},
+		{name: "PAM startup error", err: errors.New("unavailable"), handled: true},
+		{name: "cancel", abort: errPromptCancelled, handled: true},
+		{name: "timeout", abort: errPromptTimeout, handled: true},
+		{name: "success", result: auth.Result{OK: true}},
+		{name: "aborted apparent success", result: auth.Result{OK: true}, abort: errPromptCancelled, handled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := lockd.NewView(theme.Default(), "u", "h")
+			handled := showAuthFailure(v, tc.result, tc.err, tc.abort, now)
+			if handled != tc.handled || v.Attempts != tc.count || v.Terminal() != tc.terminal {
+				t.Fatalf("handled=%v count=%d terminal=%v", handled, v.Attempts, v.Terminal())
+			}
+		})
 	}
 }
