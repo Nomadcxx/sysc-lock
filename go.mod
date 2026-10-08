@@ -3,8 +3,8 @@ module github.com/Nomadcxx/sysc-lock
 go 1.26.0
 
 require (
-	github.com/Nomadcxx/sysc-Go v1.0.6-0.20261008162650-8414641ba61c
-	github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261008163306-24ec1cb9fd6a
+	github.com/Nomadcxx/sysc-Go v1.0.6-0.20261008172414-1ff1f6c3c8d0
+	github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261008172631-0157cbfe0ea0
 	github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
