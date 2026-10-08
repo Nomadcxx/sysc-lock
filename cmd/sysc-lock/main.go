@@ -155,6 +155,10 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			menu.Close()
 			if changed := gate.pressOptions(&view.Reveal, optionsKey(k), opts, now); changed {
 				backgroundChanged := cfg.Effect != opts.Effect() || cfg.Palette != opts.Theme()
+				if cfg.Palette != opts.Theme() {
+					follow := false
+					cfg.FollowShell = &follow
+				}
 				cfg.Effect, cfg.Palette = opts.Effect(), opts.Theme()
 				cfg.Header, cfg.TextEffect = opts.Header(), opts.TextEffect()
 				applyArtwork()
@@ -277,6 +281,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	} else {
 		cfg = loaded
 	}
+	cfg = cfg.WithShellTheme()
 	opts.Set(cfg.Effect, cfg.Palette)
 	opts.SetArtwork(headerIDs, append([]string{"none"}, renderer.TextEffects()...), cfg.Header, cfg.TextEffect)
 	applyArtwork()
