@@ -17,6 +17,7 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
 	xdraw "golang.org/x/image/draw"
+	"golang.org/x/image/math/fixed"
 )
 
 func TestStatusReplacesUnsupportedGlyphs(t *testing.T) {
@@ -1086,5 +1087,54 @@ func TestStatusTonesMeetContrastOverTheBackdrop(t *testing.T) {
 		if got := contrast(v.tone(tone), worst); got < floor {
 			t.Fatalf("tone %d: %.2f:1 below %.1f:1 over the dimmed backdrop", tone, got, floor)
 		}
+	}
+}
+
+func TestStatusRunesFitTheDrawnFont(t *testing.T) {
+	pct, temp := 100, -12.0
+	snap := ambient.Snapshot{
+		BatteryPct: &pct, Power: ambient.PowerCharging, Link: ambient.LinkWifi, Temp: &temp,
+		Media: ambient.Playing, Title: "Symphony No. 9 in D minor, Op. 125: IV. Presto — Allegro assai", Artist: "Berliner Philharmoniker",
+	}
+	for _, c := range []struct {
+		w, h      int
+		scale, ts float64
+	}{{1920, 1080, 1, 1}, {1920, 1080, 1.5, 1}, {2880, 1800, 2, 1}, {3840, 2160, 2, 1.5}} {
+		v := NewView(theme.Default(), "u", "h")
+		v.Scale, v.TextScale = c.scale, c.ts
+		s := Layout(c.w, c.h, c.scale, v.StyleName, widestClock)
+		corner, caption := v.StatusRunes(s)
+		if corner <= 0 || caption <= 0 {
+			t.Fatalf("%dx%d@%v: no budget (%d, %d)", c.w, c.h, c.scale, corner, caption)
+		}
+		st := snap.Status(corner, caption, Covered)
+		for name, line := range map[string]struct {
+			box   image.Rectangle
+			spans []ambient.Span
+		}{"corner": {s.Corner, st.Corner}, "caption": {s.Caption, st.Caption}} {
+			px := v.textPx(int(14*s.Scale), line.box)
+			if w := textWidth(px, ambient.Plain(line.spans)); w > line.box.Dx() {
+				t.Fatalf("%dx%d@%v ts%v %s: %q is %dpx in a %dpx box", c.w, c.h, c.scale, c.ts, name, ambient.Plain(line.spans), w, line.box.Dx())
+			}
+		}
+	}
+}
+
+func TestDrawRunsShortensOverflowWithAnEllipsis(t *testing.T) {
+	box := image.Rect(100, 10, 300, 30)
+	px := 14
+	f := face(px)
+	adv, _ := f.GlyphAdvance('W')
+	ell, _ := f.GlyphAdvance('…')
+	n := 0
+	for (adv*fixed.Int26_6(n+1) + ell).Ceil() <= box.Dx() {
+		n++
+	}
+	ink := func(ambient.Tone) color.NRGBA { return panelInk }
+	got, want := render.New(400, 40), render.New(400, 40)
+	drawRuns(got, box, 26, []ambient.Span{{Text: strings.Repeat("W", 60)}, {Text: " tail"}}, px, true, ink)
+	drawRuns(want, box, 26, []ambient.Span{{Text: strings.Repeat("W", n) + "…"}}, px, true, ink)
+	if !bytes.Equal(got.Pix, want.Pix) {
+		t.Fatal("overflowing runs must be cut to fit with a trailing ellipsis and keep their alignment")
 	}
 }

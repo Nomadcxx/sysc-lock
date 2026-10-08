@@ -214,6 +214,9 @@ func drawRuns(fb *render.Framebuffer, box image.Rectangle, baseline int, spans [
 		}, sp.Text)
 		width += font.MeasureString(f, texts[i])
 	}
+	if width.Ceil() > box.Dx() {
+		texts, width = shortenRuns(f, texts, width, box.Dx())
+	}
 	x := box.Min.X + (box.Dx()-width.Ceil())/2
 	if right {
 		x = box.Max.X - width.Ceil()
@@ -223,4 +226,41 @@ func drawRuns(fb *render.Framebuffer, box image.Rectangle, baseline int, spans [
 		d.Src = image.NewUniform(ink(sp.Tone))
 		d.DrawString(texts[i])
 	}
+}
+
+// StatusRunes is how many monospace cells fit the corner and the caption at
+// the size drawStatus draws them; the owner formats the ambient status to
+// these budgets.
+func (v *View) StatusRunes(s Scene) (corner, caption int) {
+	cells := func(box image.Rectangle) int {
+		if box.Empty() {
+			return 0
+		}
+		adv, ok := face(v.textPx(int(14*s.Scale), box)).GlyphAdvance('0')
+		if !ok || adv <= 0 {
+			return 0
+		}
+		return box.Dx() / adv.Ceil()
+	}
+	return cells(s.Corner), cells(s.Caption)
+}
+
+// shortenRuns drops runes from the end of the runs until they and a trailing
+// ellipsis fit limit pixels, so overflow keeps its alignment and reads as cut.
+func shortenRuns(f font.Face, texts []string, width fixed.Int26_6, limit int) ([]string, fixed.Int26_6) {
+	ell := font.MeasureString(f, "…")
+	for i := len(texts) - 1; i >= 0; i-- {
+		r := []rune(texts[i])
+		for len(r) > 0 && (width+ell).Ceil() > limit {
+			adv, _ := f.GlyphAdvance(r[len(r)-1])
+			width -= adv
+			r = r[:len(r)-1]
+		}
+		texts[i] = string(r)
+		if (width + ell).Ceil() <= limit {
+			texts[i] += "…"
+			return texts, width + ell
+		}
+	}
+	return texts, width
 }
