@@ -13,7 +13,7 @@ func TestFollowShell(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "sysc-shell", "shell-theme")
-	for _, name := range []string{"dracula", "blue", "tokyo-night", "catppuccin"} {
+	for _, name := range []string{"dracula", "blue", "tokyo-night", "catppuccin", "rose-pine", "kanagawa", "noctalia", "eldritch-abyss", "void", "red", "cyan", "coral", "pink"} {
 		if err := os.WriteFile(path, []byte(name+"\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
