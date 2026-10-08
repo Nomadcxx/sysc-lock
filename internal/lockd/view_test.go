@@ -320,6 +320,7 @@ func TestSceneFitsEverySize(t *testing.T) {
 				"clock": s.ClockBox, "date": s.Date, "entry": s.Entry,
 				"backing": s.Backing, "status": s.Status, "ambient": s.Ambient,
 				"menu": s.Menu, "help": s.Help, "logo": s.Logo,
+				"corner": s.Corner, "caption": s.Caption,
 				"frame": s.Frame, "rule": s.Rule, "label": s.Label, "identity": s.Identity, "options": s.OptionsMenu,
 			} {
 				if r.Empty() {
@@ -971,5 +972,71 @@ func TestLockedCaptionIsInsetIntoTopBorder(t *testing.T) {
 	}
 	if !inkAbove {
 		t.Fatal("caption ink stays inside the frame instead of sitting in its border")
+	}
+}
+
+func stackOf(s Scene) image.Rectangle {
+	return s.Header.Union(s.Logo).Union(s.ClockBox).Union(s.Date).Union(s.Caption).
+		Union(s.Rule).Union(s.Frame).Union(s.Backing).Union(s.Help).Union(s.Banner)
+}
+
+func TestStatusCornerSitsTopRightClearOfTheStack(t *testing.T) {
+	for _, c := range []struct {
+		w, h  int
+		scale float64
+	}{{960, 720, 1}, {1536, 864, 1}, {1920, 1080, 1.5}, {3440, 1440, 1}, {1080, 1920, 2}} {
+		s := Layout(c.w, c.h, c.scale, "kompaktblk", widestClock)
+		if s.Corner.Empty() {
+			t.Fatalf("%dx%d@%v: no status corner", c.w, c.h, c.scale)
+		}
+		margin := max(1, int(8*c.scale))
+		if s.Corner.Max.X != c.w-margin || s.Corner.Min.Y != margin {
+			t.Fatalf("%dx%d@%v: corner %v not in the top-right margin", c.w, c.h, c.scale, s.Corner)
+		}
+		if s.Corner.Overlaps(stackOf(s)) {
+			t.Fatalf("%dx%d@%v: corner %v overlaps the stack", c.w, c.h, c.scale, s.Corner)
+		}
+	}
+	for _, size := range [][2]int{{320, 240}, {420, 480}} {
+		s := Layout(size[0], size[1], 1, "kompaktblk", widestClock)
+		if !s.Corner.Empty() && s.Corner.Overlaps(stackOf(s)) {
+			t.Fatalf("%v: corner must drop rather than overlap", size)
+		}
+	}
+}
+
+func TestCaptionFollowsTheDate(t *testing.T) {
+	s := Layout(960, 720, 1, "kompaktblk", widestClock)
+	if s.Caption.Empty() || s.Date.Empty() {
+		t.Fatal("a 720p output has room for date and caption")
+	}
+	if s.Caption.Min.Y < s.Date.Max.Y || (!s.Rule.Empty() && s.Caption.Max.Y > s.Rule.Min.Y) {
+		t.Fatalf("caption %v must sit between the date %v and the form %v", s.Caption, s.Date, s.Rule)
+	}
+	if s.Caption.Min.X != s.Date.Min.X || s.Caption.Dx() != s.Date.Dx() {
+		t.Fatal("caption shares the date's column")
+	}
+}
+
+func TestCaptionDropsBeforeTheForm(t *testing.T) {
+	s := Layout(320, 240, 1, "kompaktblk", widestClock)
+	if !s.Caption.Empty() && (s.Help.Empty() || s.Identity.Empty()) {
+		t.Fatal("the caption must drop before help and the form chrome")
+	}
+}
+
+func TestScreensaverKeepsCornerAndCaption(t *testing.T) {
+	for _, size := range [][2]int{{1920, 1080}, {960, 720}} {
+		s := ScreensaverLayout(size[0], size[1], 1, "kompaktblk", widestClock)
+		form := Layout(size[0], size[1], 1, "kompaktblk", widestClock)
+		if s.Corner != form.Corner {
+			t.Fatalf("%v: the corner must not move between form and idle", size)
+		}
+		if s.Caption.Empty() || s.Caption.Min.Y < s.Date.Max.Y || s.Caption.Dx() != form.Caption.Dx() {
+			t.Fatalf("%v: idle caption %v must follow the date %v", size, s.Caption, s.Date)
+		}
+		if s.Corner.Overlaps(stackOf(s)) {
+			t.Fatalf("%v: idle corner overlaps the stack", size)
+		}
 	}
 }

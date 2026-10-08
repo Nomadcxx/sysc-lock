@@ -38,17 +38,21 @@ type Scene struct {
 	Menu, OptionsMenu image.Rectangle
 	Help              image.Rectangle
 	Ambient           image.Rectangle
+	// Corner is the status line in the output's top-right margin; it is
+	// dropped rather than allowed to touch the stack. Caption is the
+	// now-playing line under the date and drops right after the logo.
+	Corner, Caption image.Rectangle
 }
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
-	return s.Header.Union(s.Logo).Union(s.Frame).Union(s.Rule).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient).Union(s.Banner).Union(s.OptionsMenu)
+	return s.Header.Union(s.Logo).Union(s.Frame).Union(s.Rule).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient).Union(s.Banner).Union(s.OptionsMenu).Union(s.Corner).Union(s.Caption)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
 // function of its arguments. The style steps down to a narrower one, then to
-// plain, rather than overflow; decoration drops when the output is
-// too short; header decoration drops before credentials and help.
+// plain, rather than overflow. On short outputs rows drop in this order:
+// logo, caption, ambient, frame and identity, date, clock, help.
 func Layout(width, height int, scale float64, styleName, clockText string, attempts ...int) Scene {
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
@@ -73,6 +77,7 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	identityH, identityGap := lineH, px(8)
 	labelH, labelGap := lineH, px(4)
 	ambientH, ambientGap := lineH, px(8)
+	captionH, captionGap := lineH, px(6)
 	helpH, helpGap := lineH, px(12)
 	attemptH, warningH := 0, 0
 	if len(attempts) > 0 && attempts[0] > 0 {
@@ -89,6 +94,9 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 		if logoH > 0 {
 			h += logoH + logoGap
 		}
+		if captionH > 0 {
+			h += captionGap + captionH
+		}
 		if h > 0 {
 			h += formGap
 		}
@@ -103,6 +111,9 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	fits := func() bool { return total()+3*lineH-attemptH-warningH <= height-2*margin }
 	if !fits() {
 		logoH, logoW = 0, 0
+	}
+	if !fits() {
+		captionH, captionGap = 0, 0
 	}
 	if !fits() {
 		ambientH, ambientGap = 0, 0
@@ -139,6 +150,11 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	if dateH > 0 {
 		s.Date = image.Rect((width-columnW)/2, y, (width+columnW)/2, y+dateH)
 		y += dateH
+	}
+	if captionH > 0 {
+		y += captionGap
+		s.Caption = image.Rect((width-columnW)/2, y, (width+columnW)/2, y+captionH)
+		y += captionH
 	}
 	s.DateSize = dateSize
 	if headerH() > 0 {
@@ -188,12 +204,20 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	menuH := min(px(260), max(1, height-2*margin))
 	menuY := max(margin, min(formTop, height-margin-menuH))
 	s.Menu = image.Rect((width-columnW)/2, menuY, (width+columnW)/2, menuY+menuH)
+	cornerW := min(px(360), max(0, width-2*margin))
+	s.Corner = image.Rect(width-margin-cornerW, margin, width-margin, margin+lineH)
+	stack := s.Header.Union(s.Logo).Union(s.ClockBox).Union(s.Date).Union(s.Caption).
+		Union(s.Rule).Union(s.Frame).Union(s.Backing).Union(s.Help).Union(s.Menu).Union(s.OptionsMenu)
+	if cornerW < px(60) || s.Corner.Overlaps(stack) {
+		s.Corner = image.Rectangle{}
+	}
 	return s
 }
 
 // ScreensaverLayout retains the larger idle clock and wordmark without the form.
 func ScreensaverLayout(width, height int, scale float64, style, text string) Scene {
 	s := Layout(width, height, scale, style, text)
+	corner, captionW := s.Corner, s.Caption.Dx()
 	gap := max(4, int(8*s.Scale))
 	bannerH := max(16, int(22*s.Scale))
 	logoW, logoH := logoSize(width, height, s.Scale)
@@ -231,6 +255,13 @@ func ScreensaverLayout(width, height int, scale float64, style, text string) Sce
 	s.Date = image.Rectangle{}
 	if dateH > 0 {
 		s.Date = image.Rect(gap, y, width-gap, y+dateH)
+		y += dateH + gap
+	}
+	if lineH := max(16, int(20*s.Scale)); captionW > 0 && y+lineH <= height-gap {
+		s.Caption = image.Rect((width-captionW)/2, y, (width+captionW)/2, y+lineH)
+	}
+	if !corner.Overlaps(s.Logo.Union(s.Banner).Union(s.ClockBox).Union(s.Date).Union(s.Caption)) {
+		s.Corner = corner
 	}
 	return s
 }
