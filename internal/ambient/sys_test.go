@@ -37,9 +37,29 @@ func TestReadBatteryFindsFirstBattery(t *testing.T) {
 		},
 		dirs: map[string][]string{"/ps": {"ADP0", "BAT0"}},
 	}
-	pct, charging, ok := ReadBattery(fs, "/ps")
-	if !ok || pct != 82 || !charging {
-		t.Fatalf("got %d %v %v", pct, charging, ok)
+	pct, power, ok := ReadBattery(fs, "/ps")
+	if !ok || pct != 82 || power != PowerCharging {
+		t.Fatalf("got %d %q %v", pct, power, ok)
+	}
+}
+
+func TestReadBatteryNormalizesStatus(t *testing.T) {
+	for status, want := range map[string]string{
+		"Charging\n":     PowerCharging,
+		"Discharging\n":  PowerDischarging,
+		"Full\n":         PowerFull,
+		"Not charging\n": PowerPlugged,
+		"Unknown\n":      "",
+		"":               "",
+	} {
+		files := map[string]string{"/ps/BAT0/type": "Battery\n", "/ps/BAT0/capacity": "50\n"}
+		if status != "" {
+			files["/ps/BAT0/status"] = status
+		}
+		_, power, ok := ReadBattery(mapFS{files: files, dirs: map[string][]string{"/ps": {"BAT0"}}}, "/ps")
+		if !ok || power != want {
+			t.Fatalf("status %q: got %q, want %q", status, power, want)
+		}
 	}
 }
 

@@ -19,12 +19,18 @@ const (
 	Paused    = "paused"
 	Stopped   = "stopped"
 	Sep       = " • "
+
+	// Battery power states, normalized from sysfs "status".
+	PowerCharging    = "charging"
+	PowerDischarging = "discharging"
+	PowerFull        = "full"
+	PowerPlugged     = "plugged" // "Not charging": on AC, held below full
 )
 
 type Snapshot struct {
 	AsOf       time.Time `json:"as_of"`
 	BatteryPct *int      `json:"battery_pct,omitempty"`
-	Charging   *bool     `json:"charging,omitempty"`
+	Power      string    `json:"power,omitempty"`
 	Link       string    `json:"link,omitempty"`
 	Media      string    `json:"media,omitempty"`
 	Title      string    `json:"title,omitempty"`
