@@ -208,6 +208,43 @@ func TestToolchainPassesThenBuilds(t *testing.T) {
 	}
 }
 
+// The probe must survive a real compiler: "-x -" makes gcc swallow "-" as the
+// language argument and report no input files even with libpam headers present.
+// This runs the real runner so the installer's own argv is what gets tested.
+func TestToolchainProbeRealCompiler(t *testing.T) {
+	cc, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("no C compiler available")
+	}
+	// Establish that this compiler genuinely resolves includes on stdin: an
+	// include that cannot exist has to fail. A compiler that passes it would
+	// make the real probe below pass vacuously.
+	bogus := exec.Command(cc, "-E", "-")
+	bogus.Stdin = strings.NewReader("#include <security/no_such_pam_probe.h>\n")
+	if err := bogus.Run(); err == nil {
+		t.Skip("compiler does not fail on a missing include; probe cannot discriminate")
+	}
+	restoreFakes(t)
+	goCmd = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		switch {
+		case name == "go" && len(args) > 0 && args[0] == "env":
+			return exec.CommandContext(ctx, "sh", "-c", "echo "+cc)
+		case name == "go":
+			return fakeGoBuildOK(ctx, name, args...)
+		default:
+			// The probe: run the real compiler with the installer's own argv.
+			return exec.CommandContext(ctx, name, args...)
+		}
+	}
+	r := newRunner(testOpts(t), testLogger(t))
+	if err := r.runAll(context.Background(), nil); err != nil {
+		t.Fatalf("probe failed: %v", err)
+	}
+	if st := r.snapshot(); st.status[1] != statusDone {
+		t.Errorf("toolchain task status = %v, want done", st.status[1])
+	}
+}
+
 func TestCandidateSkipsToolchainAndBuild(t *testing.T) {
 	restoreFakes(t)
 	dir := t.TempDir()
