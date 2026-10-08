@@ -31,6 +31,99 @@ func TestAmbientReplacesUnsupportedGlyphs(t *testing.T) {
 	}
 }
 
+func TestCompositionUsesOneBoundedColumn(t *testing.T) {
+	s := Layout(1536, 864, 1, "kompaktblk", widestClock)
+	if s.Identity.Empty() || s.Identity.Max.Y > s.Label.Min.Y || s.Identity.Overlaps(s.Indicators) {
+		t.Fatal("account identity must be separate from field and keyboard indicators")
+	}
+	if s.Frame.Dx() > 520 || s.Logo.Dx() > s.Frame.Dx()/2 || s.ClockBox.Dx() > s.Frame.Dx() {
+		t.Fatalf("header and form do not share a restrained column: %+v", s)
+	}
+	if s.OptionsMenu != s.Frame {
+		t.Fatalf("F1 menu must replace the form in its column: %+v", s)
+	}
+}
+
+func TestRejectionFeedbackDoesNotMoveTheField(t *testing.T) {
+	for _, style := range art.Names() {
+		for _, scale := range []float64{1, 1.25, 1.5} {
+			original := Layout(1536, 864, scale, style, widestClock)
+			for _, attempts := range []int{1, 3} {
+				failed := Layout(1536, 864, scale, style, widestClock, attempts)
+				if original.Entry != failed.Entry {
+					t.Fatalf("%s scale %v attempt %d moves field: %v -> %v", style, scale, attempts, original.Entry, failed.Entry)
+				}
+			}
+		}
+	}
+}
+
+func TestEmptyFieldHasNoDuplicatePasswordPlaceholder(t *testing.T) {
+	now := time.Unix(600, 0)
+	v := NewView(theme.Default(), "u", "h")
+	v.Reduced = true
+	v.Entry = &input.Model{}
+	v.Reveal.Show(now)
+	s := Layout(960, 720, 1, v.StyleName, v.clockText(now))
+	fb := render.New(960, 720)
+	v.Render(fb, now)
+	box := image.Rect(s.Entry.Min.X+s.Entry.Dx()/4, s.Entry.Min.Y+4, s.Entry.Max.X-s.Entry.Dx()/4, s.Entry.Max.Y-4)
+	for y := box.Min.Y; y < box.Max.Y; y++ {
+		for x := box.Min.X; x < box.Max.X; x++ {
+			if got := color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA); got != v.ground() {
+				t.Fatal("empty field has text competing with its label")
+			}
+		}
+	}
+}
+
+func TestOptionsUsesThemeAccent(t *testing.T) {
+	now := time.Unix(600, 0)
+	v := NewView(theme.Default().WithScheme("eldritch"), "u", "h")
+	v.Reduced = true
+	v.Options = &MenuView{Open: true, Title: "Options", Progress: -1, Rows: []PowerRow{{Title: "Background", Value: "none", Selected: true}, {Title: "Theme", Value: "eldritch"}}}
+	fb := render.New(960, 720)
+	v.Render(fb, now)
+	s := Layout(960, 720, 1, v.StyleName, v.clockText(now))
+	if got := color.NRGBAModel.Convert(fb.At(s.OptionsMenu.Min.X, s.OptionsMenu.Min.Y)).(color.NRGBA); got != v.accent() {
+		t.Fatalf("options frame %v does not use theme accent %v", got, v.accent())
+	}
+}
+
+func TestOptionsDrawsLabelsAndValuesAtDefaultScale(t *testing.T) {
+	v := NewView(theme.Default(), "u", "h")
+	a, b := render.New(520, 260), render.New(520, 260)
+	p := MenuView{Title: "Options", Progress: -1, Rows: []PowerRow{{Title: "Background", Value: "none", Selected: true}, {Title: "Theme", Value: "eldritch"}}}
+	v.drawPopup(a, a.Bounds(), p, v.accent())
+	p.Rows[1].Value = "nord"
+	v.drawPopup(b, b.Bounds(), p, v.accent())
+	if bytes.Equal(a.Pix, b.Pix) {
+		t.Fatal("selected values are not rendered")
+	}
+}
+
+func TestOptionsHasNoHoldBar(t *testing.T) {
+	v := NewView(theme.Default(), "u", "h")
+	fb := render.New(520, 260)
+	box := fb.Bounds()
+	v.drawPopup(fb, box, MenuView{Title: "Options", Progress: -1}, v.accent())
+	for y := box.Dy() / 2; y < box.Max.Y-2; y++ {
+		for x := box.Min.X + 2; x < box.Max.X-2; x++ {
+			if fb.At(x, y) != v.ground() {
+				t.Fatal("options draws a power hold bar")
+			}
+		}
+	}
+}
+
+func TestDecorativeTintKeepsItsThemeHue(t *testing.T) {
+	v := NewView(theme.Default().WithScheme("eldritch"), "u", "h")
+	ink := v.clockInk()
+	if ink == panelInk || contrast(ink, color.NRGBA{R: 85, G: 85, B: 85, A: 255}) < 3 {
+		t.Fatalf("clock must retain a contrast-safe theme tint: %v", ink)
+	}
+}
+
 func TestCaretUsesFrameTimeAndHonorsReducedMotion(t *testing.T) {
 	v := NewView(theme.Default(), "user", "host")
 	fb := render.New(800, 600)
@@ -219,15 +312,15 @@ func TestSceneFitsEverySize(t *testing.T) {
 	for _, c := range []struct {
 		w, h  int
 		scale float64
-	}{{320, 240, 1}, {420, 480, 1}, {1920, 1080, 1.25}, {3440, 1440, 1}} {
-		for _, style := range []string{"kompaktblk", "phm_blocky_reverse", "plain"} {
+	}{{320, 240, 1}, {420, 480, 1}, {1536, 864, 1.25}, {1920, 1080, 1.5}, {1920, 1080, 1.25}, {3440, 1440, 1}} {
+		for _, style := range art.Names() {
 			s := Layout(c.w, c.h, c.scale, style, widestClock)
 			fb := image.Rect(0, 0, c.w, c.h)
 			for name, r := range map[string]image.Rectangle{
 				"clock": s.ClockBox, "date": s.Date, "entry": s.Entry,
 				"backing": s.Backing, "status": s.Status, "ambient": s.Ambient,
 				"menu": s.Menu, "help": s.Help, "logo": s.Logo,
-				"frame": s.Frame, "rule": s.Rule, "label": s.Label,
+				"frame": s.Frame, "rule": s.Rule, "label": s.Label, "identity": s.Identity, "options": s.OptionsMenu,
 			} {
 				if r.Empty() {
 					continue // a dropped row, like the logo or title on tiny outputs
@@ -368,7 +461,7 @@ func TestStatusShowsWhileEntryHidden(t *testing.T) {
 	}
 }
 
-func TestHiddenEntryDrawsNoFieldAndRevealedDoes(t *testing.T) {
+func TestRevealAddsCaretWithoutMovingField(t *testing.T) {
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	hidden := NewView(theme.Default(), "u", "h")
 	hidden.Reduced = true
@@ -385,9 +478,9 @@ func TestHiddenEntryDrawsNoFieldAndRevealedDoes(t *testing.T) {
 	}
 	ink := func(fb *render.Framebuffer) int {
 		n := 0
-		for y := s.Entry.Min.Y; y < s.Entry.Max.Y; y++ {
-			for x := s.Entry.Min.X; x < s.Entry.Max.X; x++ {
-				if color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA) == panelInk {
+		for y := s.Entry.Min.Y + 2; y < s.Entry.Max.Y-2; y++ {
+			for x := s.Entry.Min.X + 2; x < s.Entry.Max.X-2; x++ {
+				if color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA) == shown.accent() {
 					n++
 				}
 			}
@@ -398,7 +491,7 @@ func TestHiddenEntryDrawsNoFieldAndRevealedDoes(t *testing.T) {
 		t.Fatal("hidden entry must draw no ink inside the field")
 	}
 	if ink(b) == 0 {
-		t.Fatal("the revealed entry must draw its placeholder ink")
+		t.Fatal("the revealed entry must draw its left caret")
 	}
 }
 
@@ -483,13 +576,13 @@ func TestMutedRoleMeetsTheHelpLineContrastFloor(t *testing.T) {
 	}
 }
 
-func TestHintStripSitsOnTheOutputNotInTheStack(t *testing.T) {
+func TestHintStripFollowsTheForm(t *testing.T) {
 	s := Layout(960, 720, 1, "", "12:59:59 PM")
 	if s.Help.Empty() {
 		t.Fatal("a 720p output has room for the hint")
 	}
-	if s.Help.Max.Y != 720-8 {
-		t.Fatalf("hint %v must sit on the output, 8px in from the edge", s.Help)
+	if gap := s.Help.Min.Y - s.Frame.Max.Y; gap < 8 || gap > 20 {
+		t.Fatalf("hint must follow the form with a nearby gap: %v", s.Help)
 	}
 	if !s.Ambient.Empty() && s.Help.Overlaps(s.Ambient) {
 		t.Fatal("hint overlaps the ambient row")
@@ -499,13 +592,13 @@ func TestHintStripSitsOnTheOutputNotInTheStack(t *testing.T) {
 	}
 }
 
-func TestBackingStopsAtTheStatusLine(t *testing.T) {
+func TestAmbientBelongsToTheForm(t *testing.T) {
 	s := Layout(960, 720, 1, "", "12:59:59 PM")
 	if s.Ambient.Empty() {
 		t.Fatal("a 720p output has an ambient slot")
 	}
-	if s.Backing.Max.Y > s.Ambient.Min.Y {
-		t.Fatalf("backing %v bleeds into ambient %v", s.Backing, s.Ambient)
+	if !s.Ambient.In(s.Backing) || !s.Ambient.In(s.Frame) {
+		t.Fatalf("ambient %v must stay inside the form %v", s.Ambient, s.Frame)
 	}
 }
 
@@ -607,7 +700,7 @@ func TestHoldBarFillsAsTheHoldRuns(t *testing.T) {
 
 func TestPopupAndHintStayInsideEveryOutput(t *testing.T) {
 	for _, size := range [][2]int{{320, 240}, {420, 480}, {960, 720}, {1920, 1080}, {3440, 1440}} {
-		for _, style := range []string{"kompaktblk", "phm_blocky_reverse", "plain"} {
+		for _, style := range art.Names() {
 			now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 			v := NewView(theme.Default(), "Sample Account", "example")
 			v.Reduced = true

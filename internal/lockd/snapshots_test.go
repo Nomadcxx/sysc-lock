@@ -139,8 +139,8 @@ func TestOfflineViewSnapshots(t *testing.T) {
 						}
 					}
 				}
-				if name == "hidden" && ground != 0 {
-					t.Fatalf("hidden: ambient slot painted %d ground pixels", ground)
+				if name == "hidden" && ground != s.Ambient.Dx()*s.Ambient.Dy() {
+					t.Fatalf("hidden: form footer must retain its opaque backing, got %d ground pixels", ground)
 				}
 				if name == "ambient" && ground < 100 {
 					t.Fatalf("ambient: row missing its ground, counted %d pixels", ground)
@@ -203,6 +203,9 @@ func TestOfflineParitySnapshots(t *testing.T) {
 		w, h          int
 	}{
 		{"eldritch", "prompt", 960, 720}, {"nord", "prompt", 960, 720},
+		{"eldritch", "prompt", 1536, 864}, {"eldritch", "options", 1536, 864},
+		{"eldritch", "error", 1536, 864}, {"eldritch", "caps", 1536, 864},
+		{"eldritch", "options", 320, 240},
 		{"rama", "warning", 960, 720}, {"rama", "warning", 320, 240},
 		{"eldritch", "screensaver", 960, 720}, {"eldritch", "screensaver", 320, 240},
 	} {
@@ -211,13 +214,19 @@ func TestOfflineParitySnapshots(t *testing.T) {
 			v := NewView(theme.Default().WithScheme(tc.scheme), "Sample Account", "example")
 			v.Reduced = true
 			v.Entry = &input.Model{}
-			v.Caps = true
+			v.Caps = tc.state == "caps"
 			v.Layout = "us"
 			v.Hint = "F1 Options | Enter Unlock"
-			v.Ambient = "[#####.....] 53% | Wi-Fi | playing"
+			v.Ambient = "[#####.....] 53% | Wi-Fi | Song - Artist"
 			v.Reveal.Show(now)
 			fb := render.New(tc.w, tc.h)
 			v.Render(fb, now)
+			if tc.state == "options" {
+				v.Options = &MenuView{Open: true, Title: "────///////OPTIONS///////────", Progress: -1, Help: "↑↓ Select row • ←→ Change", Rows: []PowerRow{{Title: "Background", Value: "none", Selected: true}, {Title: "Theme", Value: tc.scheme}}}
+			}
+			if tc.state == "error" {
+				v.SetError("Incorrect password", now)
+			}
 			if tc.state == "warning" {
 				for i := 0; i < 3; i++ {
 					v.Reject("Incorrect password", now)

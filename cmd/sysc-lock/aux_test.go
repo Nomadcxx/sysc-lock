@@ -8,6 +8,7 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
+	"github.com/Nomadcxx/sysc-lock/internal/options"
 	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
 	"os"
@@ -553,5 +554,23 @@ func TestParityOnlyCredentialRejectionsIncreaseAttempts(t *testing.T) {
 				t.Fatalf("handled=%v count=%d terminal=%v", handled, v.Attempts, v.Terminal())
 			}
 		})
+	}
+}
+
+func TestOptionsFrameSeparatesLabelsAndChoices(t *testing.T) {
+	o := options.New([]string{"none", "fire"}, []string{"eldritch", "nord"}, "none", "eldritch")
+	if optionsFrame(o) != nil {
+		t.Fatal("closed menu rendered")
+	}
+	o.Press(options.Key{F1: true})
+	p := optionsFrame(o)
+	if p.Progress != -1 || len(p.Rows) != 2 || p.Rows[0].Title != "Background" || p.Rows[0].Value != "none" || !p.Rows[0].Selected || p.Rows[1].Title != "Theme" || p.Rows[1].Value != "eldritch" {
+		t.Fatalf("bad options frame: %+v", p)
+	}
+	o.Press(options.Key{Down: true})
+	o.Press(options.Key{Right: true})
+	p = optionsFrame(o)
+	if !p.Rows[1].Selected || p.Rows[1].Value != "nord" {
+		t.Fatalf("frame did not follow model: %+v", p)
 	}
 }
