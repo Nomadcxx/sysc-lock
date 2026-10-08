@@ -13,6 +13,7 @@ import (
 	"github.com/Nomadcxx/sysc-Go/animations"
 
 	"github.com/Nomadcxx/sysc-lock/internal/ambient"
+	"github.com/Nomadcxx/sysc-lock/internal/art"
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/config"
 	"github.com/Nomadcxx/sysc-lock/internal/inhibit"
@@ -22,6 +23,7 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
+	"github.com/Nomadcxx/sysc-terminal/renderer"
 )
 
 // The request command exits 0 after confirmed authenticated unlock; failures exit 1.
@@ -94,6 +96,26 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	menu := power.New(nil, power.Availability{}, sessionID)
 	opts := options.New(effectChoices(), animations.GetThemeNames(), config.Default().Effect, config.Default().Palette)
 	cfg := config.Default()
+	if err := art.SeedHeaders(config.HeadersPath()); err != nil {
+		fmt.Fprintln(os.Stderr, "sysc-lock: could not create headers.conf; shipped artwork remains available")
+	}
+	headers, headersErr := art.LoadHeaders(config.HeadersPath())
+	if headersErr != nil {
+		fmt.Fprintln(os.Stderr, "sysc-lock: invalid headers.conf; using shipped artwork")
+	}
+	headerIDs := make([]string, len(headers))
+	for i, h := range headers {
+		headerIDs[i] = h.ID
+	}
+	applyArtwork := func() {
+		for _, h := range headers {
+			if h.ID == opts.Header() {
+				view.Header = h.Text
+				break
+			}
+		}
+		view.TextEffect, view.TextPalette = opts.TextEffect(), opts.Theme()
+	}
 	executor := power.Executor{Session: sessionID}
 	var client *lockd.Client
 	client, err = lockd.Connect(st, func(k lockd.Key) {
@@ -124,15 +146,18 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			client.Repaint()
 			return
 		}
-		if !gate.visible(model, &view.Reveal, now, menu.Open() || opts.Open() || view.Powering != "") {
+		if !k.F1 && !k.PageUp && !k.PageDown && !gate.visible(model, &view.Reveal, now, menu.Open() || opts.Open() || view.Powering != "") {
 			gate.press(model, &view.Reveal, k, now)
 			client.Repaint()
 			return
 		}
-		if opts.Open() || k.F1 {
+		if opts.Open() || k.F1 || (!menu.Open() && (k.PageUp || k.PageDown)) {
 			menu.Close()
 			if changed := gate.pressOptions(&view.Reveal, optionsKey(k), opts, now); changed {
+				backgroundChanged := cfg.Effect != opts.Effect() || cfg.Palette != opts.Theme()
 				cfg.Effect, cfg.Palette = opts.Effect(), opts.Theme()
+				cfg.Header, cfg.TextEffect = opts.Header(), opts.TextEffect()
+				applyArtwork()
 				if err := config.Save(config.Path(), cfg); err != nil {
 					fmt.Fprintln(os.Stderr, "sysc-lock: options: save failed:", err)
 				}
@@ -141,9 +166,11 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 				if eff == config.EffectNone {
 					eff = ""
 				}
-				client.Post(func() {
-					client.ApplyPresentation(eff, cfg.Palette, cfg.ReducedMotion, cfg.BackendChoice(), cfg.GpuPowerSave())
-				})
+				if backgroundChanged {
+					client.Post(func() {
+						client.ApplyPresentation(eff, cfg.Palette, cfg.ReducedMotion, cfg.BackendChoice(), cfg.GpuPowerSave())
+					})
+				}
 			}
 			client.Repaint()
 			return
@@ -251,6 +278,8 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		cfg = loaded
 	}
 	opts.Set(cfg.Effect, cfg.Palette)
+	opts.SetArtwork(headerIDs, append([]string{"none"}, renderer.TextEffects()...), cfg.Header, cfg.TextEffect)
+	applyArtwork()
 	view.StyleName, view.Clock24, view.Reduced = cfg.ClockStyle, cfg.Clock24h, cfg.ReducedMotion
 	view.Pal = view.Pal.WithScheme(cfg.Palette)
 	effect := cfg.Effect
@@ -394,15 +423,15 @@ func powerFrame(m *power.Menu, now time.Time) *lockd.PowerView {
 }
 
 func optionsKey(k lockd.Key) options.Key {
-	return options.Key{Up: k.Up, Down: k.Down, Left: k.Left, Right: k.Right, Enter: k.Enter, Escape: k.Escape, F1: k.F1, Released: k.Released}
+	return options.Key{Up: k.Up, Down: k.Down, Left: k.Left, Right: k.Right, Enter: k.Enter, Escape: k.Escape, F1: k.F1, PageUp: k.PageUp, PageDown: k.PageDown, Released: k.Released}
 }
 
 func optionsFrame(o *options.Options) *lockd.MenuView {
 	if !o.Open() {
 		return nil
 	}
-	p := &lockd.MenuView{Open: true, Title: "────///////OPTIONS///////────", Help: "↑↓ Select row • ←→ Change", Progress: -1}
-	for i, row := range []lockd.PowerRow{{Title: "Background", Value: o.Effect()}, {Title: "Theme", Value: o.Theme()}} {
+	p := &lockd.MenuView{Open: true, Title: "────///////OPTIONS///////────", Help: "↑↓ Row • ←→ Change • PgUp/PgDn Header", Progress: -1}
+	for i, row := range []lockd.PowerRow{{Title: "Background", Value: o.Effect()}, {Title: "Theme", Value: o.Theme()}, {Title: "Header", Value: o.Header()}, {Title: "Text effect", Value: o.TextEffect()}} {
 		row.Selected = i == o.Selected()
 		p.Rows = append(p.Rows, row)
 	}
@@ -410,7 +439,7 @@ func optionsFrame(o *options.Options) *lockd.MenuView {
 }
 
 // effectChoices is the menu's background list: none plus every scene effect;
-// text-based effects need session text and stay out of the lock screen.
+// text effects use the separately selected header.
 func effectChoices() []string {
 	text := map[string]bool{}
 	for _, n := range animations.GetTextBasedEffects() {

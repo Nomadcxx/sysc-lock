@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nomadcxx/sysc-terminal/renderer"
 	xdraw "golang.org/x/image/draw"
 
 	"github.com/Nomadcxx/sysc-lock/internal/art"
@@ -21,20 +22,26 @@ import (
 // date, and an entry that appears when a key reveals it. Errors keep the 4s
 // auto-clear; terminal PAM errors persist.
 type View struct {
-	Pal        theme.Palette
-	User, Host string
-	Layout     string // e.g. "us"; "" hides the indicator
-	Caps       bool
-	Num        bool
-	Attempts   int
-	Busy       bool
-	Scale      float64
-	TextScale  float64
-	Entry      *input.Model
-	Reveal     input.Reveal
-	StyleName  string // clock style; unknown names fall back in art.Pick
-	Clock24    bool
-	Reduced    bool // no print reveal and no jolt
+	Pal                             theme.Palette
+	User, Host                      string
+	Layout                          string // e.g. "us"; "" hides the indicator
+	Caps                            bool
+	Num                             bool
+	Attempts                        int
+	Busy                            bool
+	Scale                           float64
+	TextScale                       float64
+	Entry                           *input.Model
+	Reveal                          input.Reveal
+	StyleName                       string // clock style; unknown names fall back in art.Pick
+	Header, TextEffect, TextPalette string
+	headerBox                       image.Rectangle
+	headerConfig                    headerConfig
+	headerRenderer                  *renderer.Renderer
+	headerPixels                    []byte
+	headerStep                      time.Time
+	Clock24                         bool
+	Reduced                         bool // no print reveal and no jolt
 	// Power is nil when no action is available. Hint is the strip text,
 	// handed in by the owner so this package does not import power. Ambient
 	// is the one-line status text the owner reads from the collector's
@@ -174,6 +181,9 @@ func (v *View) NextDeadline(now time.Time) time.Time {
 			consider(now.Add(40 * time.Millisecond))
 		}
 	}
+	if v.animateHeader() && v.headerRenderer != nil && !v.headerBox.Empty() {
+		consider(now.Add(50 * time.Millisecond))
+	}
 	if v.Power != nil && v.Power.Progress >= 0 {
 		consider(now.Add(33 * time.Millisecond))
 	}
@@ -242,8 +252,13 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	if screensaver {
 		s = ScreensaverLayout(fb.Width, fb.Height, v.Scale, v.StyleName, text)
 	}
+	v.headerBox = s.Header
 	clockLimit, done := v.printLimits(now, s)
-	v.drawLogo(fb, s.Logo, v.artInk(v.banner(), 3))
+	if v.Header == "" {
+		v.drawLogo(fb, s.Logo, v.artInk(v.banner(), 3))
+	} else {
+		v.drawHeader(fb, s.Header, now)
+	}
 	if screensaver {
 		drawTextBox(fb, s.Banner, s.Banner.Min.Y+s.Banner.Dy()*3/4, "// SEE YOU SPACE COWBOY //", v.textPx(s.Banner.Dy()*3/5, s.Banner), v.artInk(v.banner(), 4.5))
 	}

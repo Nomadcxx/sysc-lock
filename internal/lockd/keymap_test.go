@@ -165,3 +165,18 @@ func TestCtrlUpdatesIndicators(t *testing.T) {
 		t.Fatal("ctrl release not reported", got)
 	}
 }
+
+func TestPageKeysCarryNoCredentialText(t *testing.T) {
+	ctx := xkb.NewContext(context.Background(), xkb.ContextNoFlags)
+	km, err := ctx.NewKeymapFromNames(&xkb.RuleNames{Layout: "us"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := &keymap{state: km.NewState(), mapData: km}
+	for _, tc := range []struct{ code, sym uint32 }{{104, symPageUp}, {109, symPageDown}} {
+		sym, text := k.resolve(tc.code)
+		if sym != tc.sym || text != "" {
+			t.Fatalf("page key: sym=%x text=%q", sym, text)
+		}
+	}
+}

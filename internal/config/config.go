@@ -36,6 +36,8 @@ type Config struct {
 	Palette       string `json:"palette"`
 	ReducedMotion bool   `json:"reduced_motion"`
 	ClockStyle    string `json:"clock_style"`
+	Header        string `json:"header"`
+	TextEffect    string `json:"text_effect"`
 	Clock24h      bool   `json:"clock_24h"`
 	// EffectFPS is effect ticks per second. The effects advance one fixed step
 	// per tick, so it also scales animation speed.
@@ -86,16 +88,21 @@ func (c Config) BlurRadiusPx() int {
 const EffectNone = "none"
 
 func Default() Config {
-	return Config{Effect: EffectNone, Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS, PowerActions: append([]power.Action{}, power.DefaultOrder...)}
+	return Config{Effect: EffectNone, Header: "ascii_1", TextEffect: EffectNone, Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS, PowerActions: append([]power.Action{}, power.DefaultOrder...)}
 }
 
 // Validate accepts EffectNone as a palette-only setting; every
 // other effect must be one the renderer knows.
 func (c Config) Validate() error {
-	if c.Effect == EffectNone {
-		if animations.GetThemeMetadata(c.Palette) == nil {
-			return fmt.Errorf("unknown palette %q", c.Palette)
+	if animations.GetThemeMetadata(c.Palette) == nil {
+		return fmt.Errorf("unknown palette %q", c.Palette)
+	}
+	if c.TextEffect != "" && c.TextEffect != EffectNone {
+		if err := renderer.ValidateText(c.TextEffect, c.Palette, "validation"); err != nil {
+			return err
 		}
+	}
+	if c.Effect == EffectNone {
 		return nil
 	}
 	return renderer.Validate(c.Effect, c.Palette)
@@ -107,6 +114,14 @@ func Path() string {
 	}
 	return filepath.Join(dir, "sysc-lock", "config.json")
 }
+func HeadersPath() string {
+	path := Path()
+	if path == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(path), "headers.conf")
+}
+
 func read(path string) (map[string]json.RawMessage, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if os.IsNotExist(err) {

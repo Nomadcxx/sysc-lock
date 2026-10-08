@@ -48,3 +48,25 @@ func TestReleasedKeysDoNothing(t *testing.T) {
 		t.Fatalf("release moved the effect to %q", o.Effect())
 	}
 }
+
+func TestHeaderCyclingAndTextEffectRows(t *testing.T) {
+	o := New([]string{"none", "fire"}, []string{"nord"}, "none", "nord")
+	o.SetArtwork([]string{"ascii_1", "ascii_2"}, []string{"none", "print", "pour"}, "ascii_1", "none")
+	if !o.Press(Key{PageUp: true}) || o.Header() != "ascii_2" || o.Open() {
+		t.Fatal("page-up must wrap headers without opening F1")
+	}
+	if o.Press(Key{PageDown: true, Released: true}) || o.Header() != "ascii_2" {
+		t.Fatal("release changed header")
+	}
+	o.Press(Key{F1: true})
+	for range 3 {
+		o.Press(Key{Down: true})
+	}
+	if !o.Press(Key{Right: true}) || o.TextEffect() != "print" {
+		t.Fatal("text row does not cycle")
+	}
+	o.Press(Key{Down: true})
+	if o.Selected() != 0 {
+		t.Fatal("four rows do not wrap")
+	}
+}

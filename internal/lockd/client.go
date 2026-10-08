@@ -20,23 +20,24 @@ import (
 // reaches the input model. Text carries the printable result ("" for control
 // keys). Runs on the pump goroutine.
 type Key struct {
-	Text      string
-	Enter     bool
-	Backspace bool
-	Escape    bool
-	Shift     bool
-	Ctrl      bool
-	CapsLock  bool
-	NumLock   bool
-	Layout    string
-	composed  bool // a completed compose sequence repeats its committed character
-	Up        bool
-	Down      bool
-	Left      bool
-	Right     bool
-	F1        bool
-	F4        bool
-	Insert    bool
+	Text             string
+	Enter            bool
+	Backspace        bool
+	Escape           bool
+	Shift            bool
+	Ctrl             bool
+	CapsLock         bool
+	NumLock          bool
+	Layout           string
+	composed         bool // a completed compose sequence repeats its committed character
+	Up               bool
+	Down             bool
+	Left             bool
+	Right            bool
+	PageUp, PageDown bool
+	F1               bool
+	F4               bool
+	Insert           bool
 	// Released marks a key going up. Enter releases drive the hold-to-confirm
 	// bar, and the keyboard-leave event releases every key at once so a missed
 	// release can never leave a hold running.

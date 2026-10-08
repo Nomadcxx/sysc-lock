@@ -224,7 +224,7 @@ func (g *enterGate) pressMenu(m *input.Model, r *input.Reveal, k power.Key, menu
 }
 
 func (g *enterGate) pressOptions(r *input.Reveal, k options.Key, o *options.Options, now time.Time) bool {
-	if g.busy {
+	if g.busy || k.Released {
 		return false
 	}
 	r.Show(now)

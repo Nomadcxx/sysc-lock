@@ -16,8 +16,8 @@ type Scene struct {
 	Cell  int // clock cell width in pixels; also the jolt step
 	// Logo and clock share the form's bounded column. Frame and Rule are
 	// decorative; compact outputs retain credentials and failure feedback.
-	Logo        image.Rectangle
-	Frame, Rule image.Rectangle
+	Logo, Header image.Rectangle
+	Frame, Rule  image.Rectangle
 	// Label is the left-aligned field name above the entry row, greet-style;
 	// it survives the decorative frame when the output is compact.
 	Label, Identity image.Rectangle
@@ -34,7 +34,7 @@ type Scene struct {
 	Backing                   image.Rectangle
 	// OptionsMenu replaces the form; Menu is the independent power popup.
 	// Help follows the form and Ambient belongs to its footer. Ambient, help,
-	// logo, frame/identity, date and clock drop in that order on short outputs.
+	// header, ambient, frame/identity, date and clock drop before help on short outputs.
 	Menu, OptionsMenu image.Rectangle
 	Help              image.Rectangle
 	Ambient           image.Rectangle
@@ -42,13 +42,13 @@ type Scene struct {
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
-	return s.Logo.Union(s.Frame).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient).Union(s.Banner).Union(s.OptionsMenu)
+	return s.Header.Union(s.Logo).Union(s.Frame).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient).Union(s.Banner).Union(s.OptionsMenu)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
 // function of its arguments. The style steps down to a narrower one, then to
-// plain, rather than overflow; the ambient row drops first when the output is
-// too short, then the hint strip, then the logo, then the frame.
+// plain, rather than overflow; decoration drops when the output is
+// too short; header decoration drops before credentials and help.
 func Layout(width, height int, scale float64, styleName, clockText string, attempts ...int) Scene {
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
@@ -64,7 +64,7 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 		clockH, clockW = px(36), columnW
 	}
 	logoW := columnW / 2
-	logoH := logoW * art.LogoH / art.LogoW
+	logoH := px(96)
 	logoGap, clockGap, formGap := px(18), px(10), px(24)
 	dateSize, dateH := px(16), px(24)
 	lineH, entryH := px(20), px(44)
@@ -98,30 +98,35 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 		return 2*padY + ruleH + innerGap + identityH + identityGap + labelH + labelGap + entryH + 2*lineH + attemptH + warningH + ambientGap + ambientH
 	}
 	total := func() int { return headerH() + formH() + helpGap + helpH }
-	if total() > height-2*margin {
-		ambientH, ambientGap = 0, 0
-	}
-	if total() > height-2*margin {
-		helpH, helpGap = 0, 0
-	}
-	if total() > height-2*margin {
+	// Reserve failure feedback before dropping decoration so rejection never
+	// changes which rows fit or moves the password field.
+	fits := func() bool { return total()+3*lineH-attemptH-warningH <= height-2*margin }
+	if !fits() {
 		logoH, logoW = 0, 0
 	}
-	if total() > height-2*margin {
+	if !fits() {
+		ambientH, ambientGap = 0, 0
+	}
+	if !fits() {
 		ruleH, innerGap, padX, padY, identityH, identityGap = 0, 0, 0, 0, 0, 0
 	}
-	if total() > height-2*margin {
+	if !fits() {
 		dateH, clockGap = 0, 0
 	}
-	if total() > height-2*margin {
+	if !fits() {
 		clockH, clockW, formGap = 0, 0, 0
 		s.Clock, s.ClockCW = nil, 0
+	}
+	if !fits() {
+		helpH, helpGap = 0, 0
 	}
 	// Extra rejection feedback extends downward without moving the field,
 	// unless a compact output needs the space to keep feedback on screen.
 	y := max(margin, min((height-total()+attemptH+warningH)/2, height-margin-(total()-attemptH-warningH+3*lineH)))
 	if logoH > 0 {
-		s.Logo = image.Rect((width-logoW)/2, y, (width+logoW)/2, y+logoH)
+		s.Header = image.Rect((width-columnW)/2, y, (width+columnW)/2, y+logoH)
+		legacyH := logoW * art.LogoH / art.LogoW
+		s.Logo = image.Rect((width-logoW)/2, y+(logoH-legacyH)/2, (width+logoW)/2, y+(logoH+legacyH)/2)
 		y += logoH + logoGap
 	}
 	if clockH > 0 {
@@ -217,6 +222,7 @@ func ScreensaverLayout(width, height int, scale float64, style, text string) Sce
 	y := max(gap, (height-total)/2)
 	if logoH > 0 {
 		s.Logo = image.Rect((width-logoW)/2, y, (width+logoW)/2, y+logoH)
+		s.Header = s.Logo
 		y += logoH + gap
 	}
 	s.Banner = image.Rect(gap, y, width-gap, y+bannerH)

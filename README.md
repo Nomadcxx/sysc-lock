@@ -110,6 +110,31 @@ chooses the CPU outright while discharging and caps `effect_fps` at 30 for
 `auto` on battery. GPU pixels never leave the process. Building lockd needs
 EGL and GLES2 development headers; the linker flags are in the package.
 Exporting GPU buffers to the compositor (dmabuf) is a later phase, not this.
+F1 opens four options rows: Background, Theme, Header and Text effect.
+Use ↑/↓ to select a row and ←/→ to change its value. PgUp/PgDown cycles
+headers directly, even with F1 closed. Choices persist in config.json as
+`header` (default `ascii_1`) and `text_effect` (default `none`). Header effects
+use the shared sysc-greet effect library and pause during password entry or
+authentication; reduced motion displays static artwork.
+
+All ASCII headers live in **one file**, `~/.config/sysc-lock/headers.conf`
+(or `$XDG_CONFIG_HOME/sysc-lock/headers.conf`). The first lock creates the
+editable default collection without replacing an existing file. Add or edit
+blocks in file order; spaces inside the triple quotes are literal:
+
+```conf
+ascii_custom="""
+  /\_/\
+ ( o.o )
+  > ^ <
+"""
+```
+
+Edits apply on the next lock. Each file supports up to 16 headers, each at most
+120 columns and 16 lines, within 64 KiB. Missing or invalid artwork uses shipped
+headers so customization cannot prevent locking. The header slot stays fixed
+while cycling; compact outputs prioritize the password form.
+
 The screen shows the clock until a key is pressed; that key only reveals the
 password entry. The entry hides again after 8 seconds when empty, or on Esc.
 After five minutes without input, the form gives way to the logo, banner,
@@ -132,7 +157,8 @@ typing works again.
 Shell Settings → Lock Screen edits this file and provides a labeled ordinary
 still preview rendered by the installed locker. Apply affects the next lock.
 `sysc-lock --preview` reads a bounded JSON object from stdin and writes a PNG to
-stdout, using sample identity and status. It does not lock, authenticate or write
+stdout, using sample identity and status. An optional `headers` string supplies
+the same conf syntax for custom preview artwork; no user files are read. It does not lock, authenticate or write
 configuration. For example:
 
 ```sh
