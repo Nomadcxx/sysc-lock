@@ -33,11 +33,9 @@ type Scene struct {
 	Banner                    image.Rectangle
 	Backing                   image.Rectangle
 	// OptionsMenu replaces the form; Menu is the independent power popup.
-	// Help follows the form and Ambient belongs to its footer. Ambient, help,
-	// header, ambient, frame/identity, date and clock drop before help on short outputs.
+	// Help follows the form.
 	Menu, OptionsMenu image.Rectangle
 	Help              image.Rectangle
-	Ambient           image.Rectangle
 	// Corner is the status line in the output's top-right margin; it is
 	// dropped rather than allowed to touch the stack. Caption is the
 	// now-playing line under the date and drops right after the logo.
@@ -46,13 +44,13 @@ type Scene struct {
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
-	return s.Header.Union(s.Logo).Union(s.Frame).Union(s.Rule).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient).Union(s.Banner).Union(s.OptionsMenu).Union(s.Corner).Union(s.Caption)
+	return s.Header.Union(s.Logo).Union(s.Frame).Union(s.Rule).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Banner).Union(s.OptionsMenu).Union(s.Corner).Union(s.Caption)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
 // function of its arguments. The style steps down to a narrower one, then to
 // plain, rather than overflow. On short outputs rows drop in this order:
-// logo, caption, ambient, frame and identity, date, clock, help.
+// logo, caption, frame and identity, date, clock, help.
 func Layout(width, height int, scale float64, styleName, clockText string, attempts ...int) Scene {
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
@@ -76,7 +74,6 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	padY, ruleH := px(12), lineH
 	identityH, identityGap := lineH, px(8)
 	labelH, labelGap := lineH, px(4)
-	ambientH, ambientGap := lineH, px(8)
 	captionH, captionGap := lineH, px(6)
 	helpH, helpGap := lineH, px(12)
 	attemptH, warningH := 0, 0
@@ -103,7 +100,7 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 		return h
 	}
 	formH := func() int {
-		return 2*padY + identityH + identityGap + labelH + labelGap + entryH + 2*lineH + attemptH + warningH + ambientGap + ambientH
+		return 2*padY + identityH + identityGap + labelH + labelGap + entryH + 2*lineH + attemptH + warningH
 	}
 	total := func() int { return headerH() + formH() + helpGap + helpH }
 	// Reserve failure feedback before dropping decoration so rejection never
@@ -114,9 +111,6 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	}
 	if !fits() {
 		captionH, captionGap = 0, 0
-	}
-	if !fits() {
-		ambientH, ambientGap = 0, 0
 	}
 	if !fits() {
 		ruleH, padX, padY, identityH, identityGap = 0, 0, 0, 0, 0
@@ -186,11 +180,6 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	if warningH > 0 {
 		s.Warning = image.Rect(x, y, x+entryW, y+warningH)
 		y += warningH
-	}
-	if ambientH > 0 {
-		y += ambientGap
-		s.Ambient = image.Rect(x, y, x+entryW, y+ambientH)
-		y += ambientH
 	}
 	s.Backing = image.Rect(x, formTop+padY, x+entryW, y)
 	y += padY

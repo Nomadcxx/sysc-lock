@@ -206,7 +206,8 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			view.Hint = view.Prompt
 		}
 		cell := max(8, int(8*view.TextScale))
-		view.Ambient = row.Get(now, max(8, lockd.Layout(fb.Width, fb.Height, scale, view.StyleName, "12:59:59 PM").Entry.Dx()/cell))
+		scene := lockd.Layout(fb.Width, fb.Height, scale, view.StyleName, "12:59:59 PM")
+		view.Ambient = row.Get(now, scene.Corner.Dx()/cell, scene.Caption.Dx()/cell)
 		if background == nil {
 			view.Render(fb, now)
 		} else {

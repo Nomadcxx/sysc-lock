@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"math"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/image/font"
@@ -14,6 +15,7 @@ import (
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 
+	"github.com/Nomadcxx/sysc-lock/internal/ambient"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 )
 
@@ -182,4 +184,43 @@ func drawTextBoxAlign(fb *render.Framebuffer, box image.Rectangle, baseline int,
 	}
 	d := font.Drawer{Dst: clippedText{fb, box}, Src: image.NewUniform(col), Face: f, Dot: fixed.P(x, baseline)}
 	d.DrawString(text)
+}
+
+// Covered reports whether the lock font draws r. The owner hands it to the
+// ambient formatter, so metadata the font cannot show is replaced rather than
+// drawn as '?'.
+func Covered(r rune) bool {
+	_, ok := face(14).GlyphAdvance(r)
+	return ok
+}
+
+// drawRuns draws styled spans on one baseline inside box, right-aligned when
+// right is set and centred otherwise. Glyphs the face lacks become '?'; ink
+// is clipped to box like drawTextBox.
+func drawRuns(fb *render.Framebuffer, box image.Rectangle, baseline int, spans []ambient.Span, px int, right bool, ink func(ambient.Tone) color.NRGBA) {
+	box = box.Intersect(fb.Bounds())
+	if box.Empty() || len(spans) == 0 {
+		return
+	}
+	f := face(px)
+	texts := make([]string, len(spans))
+	width := fixed.Int26_6(0)
+	for i, sp := range spans {
+		texts[i] = strings.Map(func(r rune) rune {
+			if _, ok := f.GlyphAdvance(r); !ok {
+				return '?'
+			}
+			return r
+		}, sp.Text)
+		width += font.MeasureString(f, texts[i])
+	}
+	x := box.Min.X + (box.Dx()-width.Ceil())/2
+	if right {
+		x = box.Max.X - width.Ceil()
+	}
+	d := font.Drawer{Dst: clippedText{fb, box}, Face: f, Dot: fixed.P(max(x, box.Min.X), baseline)}
+	for i, sp := range spans {
+		d.Src = image.NewUniform(ink(sp.Tone))
+		d.DrawString(texts[i])
+	}
 }

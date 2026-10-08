@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/sysc-lock/internal/ambient"
+	"github.com/Nomadcxx/sysc-lock/internal/lockd"
 )
 
 // runAmbient collects the ambient snapshot once a second until SIGTERM. The
@@ -24,36 +25,36 @@ func runAmbient() error {
 	return ambient.Run(ctx, path, time.Second, ambient.NewGather())
 }
 
-// loadAmbient reads the snapshot file and formats the status line. Every
-// failure (missing, stale, junk, empty) is one empty string: the owner stays
-// silent rather than guessing.
-func loadAmbient(path string, now time.Time, maxRunes int) string {
-	if path == "" || maxRunes < 1 {
-		return ""
+// loadAmbient reads the snapshot file and formats the corner and caption.
+// Every failure (missing, stale, junk) is the zero Status: the owner stays
+// silent rather than guessing, and any battery alert clears with it.
+func loadAmbient(path string, now time.Time, cornerRunes, captionRunes int) ambient.Status {
+	if path == "" {
+		return ambient.Status{}
 	}
 	snap, err := ambient.Load(path, now)
 	if err != nil {
-		return ""
+		return ambient.Status{}
 	}
-	return snap.Line(maxRunes)
+	return snap.Status(cornerRunes, captionRunes, lockd.Covered)
 }
 
-// ambientRow caches the status line so the owner touches the snapshot file at
-// most once a second on its existing repaints — it never polls in a loop of
-// its own.
+// ambientRow caches the formatted status so the owner touches the snapshot
+// file at most once a second on its existing repaints; it never polls in a
+// loop of its own.
 type ambientRow struct {
-	path  string
-	at    time.Time
-	runes int
-	line  string
+	path            string
+	at              time.Time
+	corner, caption int
+	status          ambient.Status
 }
 
-func (r *ambientRow) Get(now time.Time, maxRunes int) string {
-	if r.at.IsZero() || now.Sub(r.at) >= time.Second || r.runes != maxRunes {
-		r.at, r.runes = now, maxRunes
-		r.line = loadAmbient(r.path, now, maxRunes)
+func (r *ambientRow) Get(now time.Time, cornerRunes, captionRunes int) ambient.Status {
+	if r.at.IsZero() || now.Sub(r.at) >= time.Second || r.corner != cornerRunes || r.caption != captionRunes {
+		r.at, r.corner, r.caption = now, cornerRunes, captionRunes
+		r.status = loadAmbient(r.path, now, cornerRunes, captionRunes)
 	}
-	return r.line
+	return r.status
 }
 
 // ambientChild is the running collector, or the zero value when it never

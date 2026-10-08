@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -286,19 +287,28 @@ func writeAmbientSnapshot(t *testing.T, asOf time.Time) (string, time.Time) {
 
 func TestLoadAmbientMissingAndStale(t *testing.T) {
 	now := time.Unix(900, 0)
-	if got := loadAmbient("/definitely/missing.json", now, 40); got != "" {
-		t.Fatalf("missing file: got %q, want \"\"", got)
+	if got := loadAmbient("/definitely/missing.json", now, 40, 40); !reflect.DeepEqual(got, ambient.Status{}) {
+		t.Fatalf("missing file: got %+v, want nothing", got)
 	}
-	path, now := writeAmbientSnapshot(t, now.Add(-6*time.Second))
-	if got := loadAmbient(path, now, 40); got != "" {
-		t.Fatalf("stale file: got %q, want \"\"", got)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ambient.json")
+	pct := 6
+	body, err := json.Marshal(ambient.Snapshot{AsOf: now.Add(-6 * time.Second), BatteryPct: &pct, Power: ambient.PowerDischarging})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadAmbient(path, now, 40, 40); !reflect.DeepEqual(got, ambient.Status{}) {
+		t.Fatalf("stale file must clear corner, caption and alert together: %+v", got)
 	}
 }
 
 func TestLoadAmbientGoodFile(t *testing.T) {
 	path, now := writeAmbientSnapshot(t, time.Unix(0, 0))
-	if got := loadAmbient(path, now, 40); got != "" {
-		t.Fatalf("empty snapshot: got %q, want \"\"", got)
+	if got := loadAmbient(path, now, 40, 40); !reflect.DeepEqual(got, ambient.Status{}) {
+		t.Fatalf("stale snapshot: got %+v, want nothing", got)
 	}
 
 	dir := t.TempDir()
@@ -319,8 +329,12 @@ func TestLoadAmbientGoodFile(t *testing.T) {
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if got, want := loadAmbient(path, now, 40), "[████████░░] 82% • Wi-Fi • playing • 18°"; got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	got := loadAmbient(path, now, 40, 40)
+	if c := ambient.Plain(got.Corner); c != "18° • Wi-Fi • [████████░░] 82%" {
+		t.Fatalf("corner %q", c)
+	}
+	if c := ambient.Plain(got.Caption); c != "♪ playing" {
+		t.Fatalf("caption %q", c)
 	}
 }
 
@@ -378,14 +392,14 @@ func TestAmbientRowReadsOncePerSecond(t *testing.T) {
 	}
 	write(82)
 	row := ambientRow{path: path}
-	if got, want := row.Get(base, 40), "[████████░░] 82%"; got != want {
+	if got, want := ambient.Plain(row.Get(base, 40, 40).Corner), "Offline • [████████░░] 82%"; got != want {
 		t.Fatalf("first read: got %q, want %q", got, want)
 	}
 	write(50)
-	if got, want := row.Get(base.Add(500*time.Millisecond), 40), "[████████░░] 82%"; got != want {
+	if got, want := ambient.Plain(row.Get(base.Add(500*time.Millisecond), 40, 40).Corner), "Offline • [████████░░] 82%"; got != want {
 		t.Fatalf("within the same second: got %q, want cached %q", got, want)
 	}
-	if got, want := row.Get(base.Add(1100*time.Millisecond), 40), "[█████░░░░░] 50%"; got != want {
+	if got, want := ambient.Plain(row.Get(base.Add(1100*time.Millisecond), 40, 40).Corner), "Offline • [█████░░░░░] 50%"; got != want {
 		t.Fatalf("a second later: got %q, want refreshed %q", got, want)
 	}
 }
@@ -468,11 +482,13 @@ func TestAmbientRowRecutsWhenTheBudgetChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := ambientRow{path: path}
-	if got := row.Get(now, 40); got != "[████████░░] 82% • Wi-Fi • playing" {
-		t.Fatalf("wide: %q", got)
+	wide := row.Get(now, 40, 40)
+	if ambient.Plain(wide.Corner) != "Wi-Fi • [████████░░] 82%" || ambient.Plain(wide.Caption) != "♪ playing" {
+		t.Fatalf("wide: %+v", wide)
 	}
-	if got := row.Get(now.Add(10*time.Millisecond), 4); got != "" {
-		t.Fatalf("narrow budget must drop from the right in the same second: %q", got)
+	narrow := row.Get(now.Add(10*time.Millisecond), 3, 3)
+	if ambient.Plain(narrow.Corner) != "82%" || narrow.Caption != nil {
+		t.Fatalf("a narrower budget must recut in the same second: %+v", narrow)
 	}
 }
 func TestDisplayPromptSanitizes(t *testing.T) {

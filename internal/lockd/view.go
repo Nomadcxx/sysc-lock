@@ -11,6 +11,7 @@ import (
 	"github.com/Nomadcxx/sysc-terminal/renderer"
 	xdraw "golang.org/x/image/draw"
 
+	"github.com/Nomadcxx/sysc-lock/internal/ambient"
 	"github.com/Nomadcxx/sysc-lock/internal/art"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
@@ -43,16 +44,19 @@ type View struct {
 	Clock24                         bool
 	Reduced                         bool // no print reveal and no jolt
 	// Power is nil when no action is available. Hint is the strip text,
-	// handed in by the owner so this package does not import power. Ambient
-	// is the one-line status text the owner reads from the collector's
-	// snapshot file; it draws only while the entry is visible.
+	// handed in by the owner so this package does not import power.
 	Power *PowerView
 	// Options is the F1 effects/theme menu; same popup surface as Power.
 	Options    *MenuView
 	Hint       string
 	Prompt     string // sanitized PAM prompt text, replaces the hint while set
 	PromptEcho bool
-	Ambient    string
+	// Ambient is the formatted status the owner reads from the collector's
+	// snapshot: the corner line (form and idle), the caption under the date,
+	// and a battery alert for the status row. IdleCaption keeps the caption
+	// on the idle screensaver.
+	Ambient     ambient.Status
+	IdleCaption bool
 	// Powering is the status shown once an action is under way. While it is
 	// set, keys are ignored.
 	Powering string
@@ -128,7 +132,8 @@ func (v *View) Activity(now time.Time) bool {
 	return wake
 }
 
-// StatusLine is the visible error text at now (empty after the 4s window).
+// StatusLine is the form's status row at now: a power action, verification,
+// an error (4s unless terminal), else the battery alert.
 func (v *View) StatusLine(now time.Time) string {
 	if v.Powering != "" {
 		return v.Powering
@@ -136,11 +141,11 @@ func (v *View) StatusLine(now time.Time) string {
 	if v.Busy {
 		return "Authenticating..."
 	}
-	if v.errMsg == "" {
-		return ""
-	}
-	if !v.errTerm && !now.Before(v.errUntil) {
+	if v.errMsg != "" && !v.errTerm && !now.Before(v.errUntil) {
 		v.errMsg = ""
+	}
+	if v.errMsg == "" {
+		return v.Ambient.Alert
 	}
 	return v.errMsg
 }
@@ -278,6 +283,7 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 		}
 		drawTextBox(fb, s.Date, s.Date.Min.Y+s.DateSize, date, px, v.dateInk())
 	}
+	v.drawStatus(fb, s, !screensaver || v.IdleCaption)
 	if screensaver {
 		return
 	}
@@ -321,7 +327,6 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 		}
 	}
 	// The guidance and status rows stay on screen at all times, greet-style.
-	v.drawAmbient(fb, s)
 	v.drawHint(fb, s)
 	if v.Power != nil && v.Power.Open {
 		v.drawPopup(fb, s.Menu, *v.Power, panelDanger)
@@ -397,27 +402,32 @@ func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
 	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/4, text, v.textPx(int(14*s.Scale), box), v.muted())
 }
 
-func (v *View) drawAmbient(fb *render.Framebuffer, s Scene) {
-	if s.Ambient.Empty() || v.Ambient == "" {
-		return
+// drawStatus draws the corner line right-aligned and, when caption is set,
+// the now-playing caption centred under the date. Both sit on the backdrop
+// like the date, so their inks are lifted against the dimmed effect.
+func (v *View) drawStatus(fb *render.Framebuffer, s Scene, caption bool) {
+	if !s.Corner.Empty() {
+		drawRuns(fb, s.Corner, s.Corner.Min.Y+s.Corner.Dy()*3/4, v.Ambient.Corner, v.textPx(int(14*s.Scale), s.Corner), true, v.tone)
 	}
-	// Ambient status belongs to the form footer, sharing its left alignment.
-	fillRect(fb, s.Ambient, v.ground())
-	fillRect(fb, image.Rect(s.Ambient.Min.X, s.Ambient.Min.Y, s.Ambient.Max.X, s.Ambient.Min.Y+max(1, int(s.Scale))), safeInk(panelMuted, v.ground(), 3))
-	box := s.Ambient
-	box.Min.Y += max(2, box.Dy()/6)
-	if box.Empty() {
-		return
+	if caption && !s.Caption.Empty() {
+		drawRuns(fb, s.Caption, s.Caption.Min.Y+s.Caption.Dy()*3/4, v.Ambient.Caption, v.textPx(int(14*s.Scale), s.Caption), false, v.tone)
 	}
-	px := v.textPx(int(14*s.Scale), box)
-	f := face(px)
-	text := strings.Map(func(r rune) rune {
-		if _, ok := f.GlyphAdvance(r); !ok {
-			return '?'
-		}
-		return r
-	}, v.Ambient)
-	drawTextBoxLeft(fb, box, box.Min.Y+box.Dy()*3/4, text, px, v.muted())
+}
+
+func (v *View) tone(t ambient.Tone) color.NRGBA {
+	switch t {
+	case ambient.ToneInk:
+		return v.artInk(panelInk, 4.5)
+	case ambient.ToneDim:
+		return v.artInk(panelMuted, 3)
+	case ambient.ToneAccent:
+		return v.artInk(role(v.Pal.Accent, panelAccent), 4.5)
+	case ambient.ToneWarn:
+		return v.artInk(panelWarn, 4.5)
+	case ambient.ToneDanger:
+		return v.artInk(panelDanger, 4.5)
+	}
+	return v.artInk(panelMuted, 4.5)
 }
 
 func (v *View) drawPopup(fb *render.Framebuffer, box image.Rectangle, p MenuView, accent color.NRGBA) {
@@ -574,6 +584,7 @@ var (
 	panelAccent = color.NRGBA{R: 147, G: 197, B: 253, A: 255}
 	panelDanger = color.NRGBA{R: 255, G: 180, B: 180, A: 255}
 	panelMuted  = color.NRGBA{R: 130, G: 138, B: 150, A: 255} // 5.3:1 on the ground
+	panelWarn   = color.NRGBA{R: 240, G: 214, B: 120, A: 255}
 )
 
 type MenuView struct {
