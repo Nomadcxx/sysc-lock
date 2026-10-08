@@ -42,7 +42,7 @@ type Scene struct {
 
 // Bounds is the union of everything the scene can draw, jolt excluded.
 func (s Scene) Bounds() image.Rectangle {
-	return s.Header.Union(s.Logo).Union(s.Frame).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient).Union(s.Banner).Union(s.OptionsMenu)
+	return s.Header.Union(s.Logo).Union(s.Frame).Union(s.Rule).Union(s.Label).Union(s.ClockBox).Union(s.Date).Union(s.Backing).Union(s.Menu).Union(s.Help).Union(s.Ambient).Union(s.Banner).Union(s.OptionsMenu)
 }
 
 // Layout computes the scene for a width by height pixel output. It is a pure
@@ -69,7 +69,7 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	dateSize, dateH := px(16), px(24)
 	lineH, entryH := px(20), px(44)
 	padX := min(px(28), max(0, (columnW-px(260))/2))
-	padY, ruleH, innerGap := px(12), lineH, px(12)
+	padY, ruleH := px(12), lineH
 	identityH, identityGap := lineH, px(8)
 	labelH, labelGap := lineH, px(4)
 	ambientH, ambientGap := lineH, px(8)
@@ -95,7 +95,7 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 		return h
 	}
 	formH := func() int {
-		return 2*padY + ruleH + innerGap + identityH + identityGap + labelH + labelGap + entryH + 2*lineH + attemptH + warningH + ambientGap + ambientH
+		return 2*padY + identityH + identityGap + labelH + labelGap + entryH + 2*lineH + attemptH + warningH + ambientGap + ambientH
 	}
 	total := func() int { return headerH() + formH() + helpGap + helpH }
 	// Reserve failure feedback before dropping decoration so rejection never
@@ -108,7 +108,7 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 		ambientH, ambientGap = 0, 0
 	}
 	if !fits() {
-		ruleH, innerGap, padX, padY, identityH, identityGap = 0, 0, 0, 0, 0, 0
+		ruleH, padX, padY, identityH, identityGap = 0, 0, 0, 0, 0
 	}
 	if !fits() {
 		dateH, clockGap = 0, 0
@@ -149,8 +149,7 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	x := (width - entryW) / 2
 	y += padY
 	if ruleH > 0 {
-		s.Rule = image.Rect(x, y, x+entryW, y+ruleH)
-		y += ruleH + innerGap
+		s.Rule = image.Rect(x, formTop-ruleH/2, x+entryW, formTop+(ruleH+1)/2)
 	}
 	if identityH > 0 {
 		s.Identity = image.Rect(x, y, x+entryW, y+identityH)

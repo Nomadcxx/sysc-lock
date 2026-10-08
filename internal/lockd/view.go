@@ -493,7 +493,7 @@ func (v *View) drawPopup(fb *render.Framebuffer, box image.Rectangle, p MenuView
 }
 
 // drawForm renders the greet-style framed form: theme-primary border, the
-// LOCKED rule along the top row, over a solid ground panel.
+// LOCKED caption inset into the top border, over a solid ground panel.
 func (v *View) drawForm(fb *render.Framebuffer, frame, backing, rule image.Rectangle, scale float64) {
 	if !frame.Empty() {
 		fillRect(fb, frame, v.ground())
@@ -505,7 +505,14 @@ func (v *View) drawForm(fb *render.Framebuffer, frame, backing, rule image.Recta
 	}
 	border(fb, frame, v.banner(), max(2, int(2*scale)))
 	if !rule.Empty() {
-		drawTextBox(fb, rule, rule.Min.Y+rule.Dy()*3/4, "────///////LOCKED///////────", v.textPx(rule.Dy()*3/5, rule), v.banner())
+		caption := "///////LOCKED///////"
+		px := v.textPx(rule.Dy()*3/5, rule)
+		width := min(rule.Dx(), textWidth(px, caption)+2*max(2, int(4*scale)))
+		box := image.Rect(rule.Min.X+(rule.Dx()-width)/2, rule.Min.Y, rule.Min.X+(rule.Dx()+width)/2, rule.Max.Y)
+		fillRect(fb, box, v.ground())
+		metrics := face(px).Metrics()
+		baseline := box.Min.Y + (box.Dy()+metrics.Ascent.Ceil()-metrics.Descent.Ceil())/2
+		drawTextBox(fb, box, baseline, caption, px, v.banner())
 	}
 }
 

@@ -940,3 +940,36 @@ func TestParityEverySchemeMeetsRenderedContrastFloors(t *testing.T) {
 		}
 	}
 }
+
+func TestLockedCaptionIsInsetIntoTopBorder(t *testing.T) {
+	v := NewView(theme.Default(), "u", "h")
+	s := Layout(1536, 864, 1, v.StyleName, widestClock)
+	if s.Rule.Empty() || s.Rule.Min.Y >= s.Frame.Min.Y || s.Rule.Max.Y <= s.Frame.Min.Y {
+		t.Fatal("caption does not straddle top border")
+	}
+	fb := render.New(1536, 864)
+	fb.Fill(v.Pal.Surface)
+	v.drawForm(fb, s.Frame, s.Backing, s.Rule, s.Scale)
+	// The continuous line must be interrupted for caption ink at its centre.
+	mid := s.Frame.Min.X + s.Frame.Dx()/2
+	ground := 0
+	for x := mid - 80; x < mid+80; x++ {
+		if fb.At(x, s.Frame.Min.Y) == v.ground() {
+			ground++
+		}
+	}
+	if ground < 20 {
+		t.Fatal("caption has no inset in top border")
+	}
+	inkAbove := false
+	for y := s.Rule.Min.Y; y < s.Frame.Min.Y; y++ {
+		for x := mid - 120; x < mid+120; x++ {
+			if c := fb.At(x, y); c != v.ground() && c != v.Pal.Surface {
+				inkAbove = true
+			}
+		}
+	}
+	if !inkAbove {
+		t.Fatal("caption ink stays inside the frame instead of sitting in its border")
+	}
+}
