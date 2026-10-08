@@ -24,6 +24,8 @@ const (
 	symDown      = 0xff54
 	symLeft      = 0xff51
 	symRight     = 0xff53
+	symPageUp    = 0xff55
+	symPageDown  = 0xff56
 	symF1        = 0xffbe
 	symF4        = 0xffc1
 	symInsert    = 0xff63
@@ -255,6 +257,7 @@ func (c *Client) setupKeyboard() {
 		k := c.keymap.indicators()
 		k.Text = text
 		k.composed = c.keymap.lastComposed
+		k.PageUp, k.PageDown = sym == symPageUp, sym == symPageDown
 		k.Backspace = sym == symBackspace
 		k.Escape = sym == symEscape
 		k.Enter, k.Up, k.Down, k.Left, k.Right, k.F1, k.F4, k.Insert = specials(sym)

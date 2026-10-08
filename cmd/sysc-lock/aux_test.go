@@ -564,7 +564,7 @@ func TestOptionsFrameSeparatesLabelsAndChoices(t *testing.T) {
 	}
 	o.Press(options.Key{F1: true})
 	p := optionsFrame(o)
-	if p.Progress != -1 || len(p.Rows) != 2 || p.Rows[0].Title != "Background" || p.Rows[0].Value != "none" || !p.Rows[0].Selected || p.Rows[1].Title != "Theme" || p.Rows[1].Value != "eldritch" {
+	if p.Progress != -1 || len(p.Rows) != 4 || p.Rows[0].Title != "Background" || p.Rows[0].Value != "none" || !p.Rows[0].Selected || p.Rows[1].Title != "Theme" || p.Rows[1].Value != "eldritch" {
 		t.Fatalf("bad options frame: %+v", p)
 	}
 	o.Press(options.Key{Down: true})
@@ -572,5 +572,24 @@ func TestOptionsFrameSeparatesLabelsAndChoices(t *testing.T) {
 	p = optionsFrame(o)
 	if !p.Rows[1].Selected || p.Rows[1].Value != "nord" {
 		t.Fatalf("frame did not follow model: %+v", p)
+	}
+}
+
+func TestPageKeysAreOptionsAndNeverCredentials(t *testing.T) {
+	now := time.Unix(600, 0)
+	o := options.New([]string{"none"}, []string{"eldritch"}, "none", "eldritch")
+	o.SetArtwork([]string{"ascii_1", "ascii_2"}, []string{"none"}, "ascii_1", "none")
+	g := &enterGate{}
+	r := &input.Reveal{}
+	if !g.pressOptions(r, optionsKey(lockd.Key{PageDown: true}), o, now) || o.Header() != "ascii_2" {
+		t.Fatal("page down not routed")
+	}
+	g.busy = true
+	if g.pressOptions(r, optionsKey(lockd.Key{PageUp: true}), o, now) || o.Header() != "ascii_2" {
+		t.Fatal("busy page mutated header")
+	}
+	g.busy = false
+	if g.pressOptions(r, optionsKey(lockd.Key{PageUp: true, Released: true}), o, now) {
+		t.Fatal("release mutated header")
 	}
 }

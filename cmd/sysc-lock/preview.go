@@ -18,23 +18,26 @@ import (
 	"github.com/Nomadcxx/sysc-terminal/renderer"
 )
 
+const maxPreviewBytes = config.MaxBytes + 6*art.MaxHeaderBytes
+
 // runPreview renders an ordinary still, without session, PAM or user-file work.
 func runPreview(in io.Reader, out io.Writer) error {
-	data, err := io.ReadAll(io.LimitReader(in, config.MaxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(in, maxPreviewBytes+1))
 	if err != nil {
 		return err
 	}
-	if len(data) > config.MaxBytes {
+	if len(data) > maxPreviewBytes {
 		return fmt.Errorf("preview exceeds JSON budget")
 	}
 	data = bytes.TrimSpace(data)
-	if len(data) == 0 || len(data) > config.MaxBytes || data[0] != '{' {
+	if len(data) == 0 || len(data) > maxPreviewBytes || data[0] != '{' {
 		return fmt.Errorf("preview requires a bounded JSON object")
 	}
 	req := struct {
-		Config config.Config `json:"config"`
-		Width  int           `json:"width"`
-		Height int           `json:"height"`
+		Config  config.Config `json:"config"`
+		Width   int           `json:"width"`
+		Height  int           `json:"height"`
+		Headers string        `json:"headers"`
 	}{Config: config.Default(), Width: 960, Height: 540}
 	if err = json.Unmarshal(data, &req); err != nil {
 		return err
@@ -46,7 +49,23 @@ func runPreview(in io.Reader, out io.Writer) error {
 		return err
 	}
 	view := lockd.NewView(theme.Default().WithScheme(req.Config.Palette), "Preview", "")
+	// Fit the composition into a still; a thumbnail is not a compact output.
+	view.Scale = min(1, float64(req.Width)/1536, float64(req.Height)/864)
 	view.Entry = &input.Model{}
+	headers := art.DefaultHeaders()
+	if req.Headers != "" {
+		if custom, err := art.ParseHeaders(req.Headers); err == nil {
+			headers = custom
+		}
+	}
+	view.Header = headers[0].Text
+	for _, h := range headers {
+		if h.ID == req.Config.Header {
+			view.Header = h.Text
+			break
+		}
+	}
+	view.TextEffect, view.TextPalette = req.Config.TextEffect, req.Config.Palette
 	view.StyleName, view.Clock24, view.Reduced = req.Config.ClockStyle, req.Config.Clock24h, req.Config.ReducedMotion
 	view.Hint = "F1 Options - Enter Unlock"
 	view.Ambient = "[||||||....] 63% - Wi-Fi - Song / Artist"
@@ -80,7 +99,9 @@ func runPreview(in io.Reader, out io.Writer) error {
 		}
 	}
 	paint(now)
-	paint(now.Add(art.PrintDuration))
+	for i := 1; i <= 40; i++ {
+		paint(now.Add(art.PrintDuration + time.Duration(i)*50*time.Millisecond))
+	}
 	return png.Encode(out, fb)
 }
 
@@ -88,7 +109,18 @@ func writeDescription(out io.Writer) error {
 	return json.NewEncoder(out).Encode(struct {
 		ClockStyles []string      `json:"clock_styles"`
 		Effects     []string      `json:"effects"`
+		TextEffects []string      `json:"text_effects"`
+		Headers     []string      `json:"headers"`
 		Palettes    []string      `json:"palettes"`
 		Defaults    config.Config `json:"defaults"`
-	}{art.Names(), effectChoices(), animations.GetThemeNames(), config.Default()})
+	}{ClockStyles: art.Names(), Effects: effectChoices(), TextEffects: append([]string{"none"}, renderer.TextEffects()...), Headers: defaultHeaderIDs(), Palettes: animations.GetThemeNames(), Defaults: config.Default()})
+}
+
+func defaultHeaderIDs() []string {
+	hs := art.DefaultHeaders()
+	ids := make([]string, len(hs))
+	for i, h := range hs {
+		ids[i] = h.ID
+	}
+	return ids
 }

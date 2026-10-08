@@ -49,7 +49,7 @@ func TestPreviewUsesDraftWithoutSessionOrConfigWrites(t *testing.T) {
 }
 
 func TestPreviewRejectsUnboundedOrInvalidInput(t *testing.T) {
-	for _, body := range []string{"null", "[]", "{}{}", `{"width":0}`, `{"height":-1}`, `{"width":2147483647}`, `{"width":1920,"height":1920}`, `{"config":{"effect":"missing"}}`, `{"config":{"palette":"missing"}}`, strings.Repeat(" ", config.MaxBytes+1), strings.Repeat(" ", config.MaxBytes-1) + "{}"} {
+	for _, body := range []string{"null", "[]", "{}{}", `{"width":0}`, `{"height":-1}`, `{"width":2147483647}`, `{"width":1920,"height":1920}`, `{"config":{"effect":"missing"}}`, `{"config":{"palette":"missing"}}`, strings.Repeat(" ", maxPreviewBytes+1), strings.Repeat(" ", maxPreviewBytes-1) + "{}"} {
 		var out bytes.Buffer
 		if err := runPreview(strings.NewReader(body), &out); err == nil || out.Len() != 0 {
 			t.Fatalf("invalid input produced output or no error: %q (%d bytes)", body[:min(len(body), 80)], out.Len())
@@ -72,5 +72,45 @@ func TestDescriptionUsesLockerChoices(t *testing.T) {
 	}
 	if strings.Join(got.ClockStyles, ",") != strings.Join(art.Names(), ",") || strings.Join(got.Effects, ",") != strings.Join(effectChoices(), ",") || got.Defaults.Effect != config.EffectNone {
 		t.Fatalf("description does not match locker choices: %+v", got)
+	}
+}
+
+func TestPreviewUsesSuppliedHeaderCatalogue(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	conf := "ascii_custom=\"\"\"\nCUSTOM LOCK HEADER\n\"\"\"\n"
+	var out bytes.Buffer
+	body, _ := json.Marshal(map[string]any{"headers": conf, "config": map[string]any{"header": "ascii_custom", "text_effect": "none"}, "width": 1536, "height": 864})
+	if err := runPreview(bytes.NewReader(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	a := append([]byte(nil), out.Bytes()...)
+	out.Reset()
+	if err := runPreview(strings.NewReader(`{"width":1536,"height":864}`), &out); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(a, out.Bytes()) {
+		t.Fatal("preview ignored custom catalogue")
+	}
+	if _, err := os.Stat(config.HeadersPath()); !os.IsNotExist(err) {
+		t.Fatal("preview wrote a header file")
+	}
+	out.Reset()
+	if err := runPreview(strings.NewReader(`{"headers":"broken"}`), &out); err != nil {
+		t.Fatal("bad decoration must fall back:", err)
+	}
+}
+
+func TestDefaultPreviewShowsHeaderChoices(t *testing.T) {
+	render := func(id string) []byte {
+		t.Helper()
+		var out bytes.Buffer
+		body, _ := json.Marshal(map[string]any{"config": map[string]any{"header": id}})
+		if err := runPreview(bytes.NewReader(body), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Bytes()
+	}
+	if bytes.Equal(render("ascii_1"), render("ascii_5")) {
+		t.Fatal("ordinary shell preview dropped the selected header")
 	}
 }

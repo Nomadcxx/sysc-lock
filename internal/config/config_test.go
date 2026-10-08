@@ -319,3 +319,26 @@ func TestEffectBackendKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestHeaderPreferencesPreserveExistingConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"effect":"none","palette":"nord","custom":7,"header":"ascii_2","text_effect":"print"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil || c.Header != "ascii_2" || c.TextEffect != "print" {
+		t.Fatal(c, err)
+	}
+	c.TextEffect = "pour"
+	if err = Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(p)
+	if err != nil || !bytes.Contains(b, []byte(`"custom": 7`)) {
+		t.Fatal(string(b), err)
+	}
+	c.TextEffect = "missing"
+	if c.Validate() == nil {
+		t.Fatal("invalid text effect accepted")
+	}
+}
