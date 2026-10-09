@@ -14,7 +14,7 @@ func TestInitialReleaseContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"workflow_dispatch:", "ubuntu-22.04", "CGO_ENABLED: \"1\"", "./cmd/sysc-lock", "SHA256SUMS", "sysc-lock-session.service", "--verify-tag"} {
+	for _, required := range []string{"workflow_dispatch:", "ubuntu-22.04", `CGO_ENABLED: "1"`, `CGO_CFLAGS: "-D_GNU_SOURCE"`, "./cmd/sysc-lock", "SHA256SUMS", "sysc-lock-session.service", "--verify-tag"} {
 		if !strings.Contains(string(data), required) {
 			t.Errorf("release workflow missing %q", required)
 		}

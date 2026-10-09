@@ -21,6 +21,8 @@ jobs:
       - name: Build and check release
         env:
           CGO_ENABLED: "1"
+          # Older glibc headers gate the PAM binding's RTLD_NEXT behind this.
+          CGO_CFLAGS: "-D_GNU_SOURCE"
           GOOS: linux
           GOARCH: amd64
         run: |
