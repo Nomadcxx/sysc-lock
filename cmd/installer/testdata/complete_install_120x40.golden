@@ -14,9 +14,6 @@
 │  Binary: /home/test/.local/bin/sysc-lock                                                                           │
 │  Unit:   /home/test/.local/share/systemd/user/sysc-lock-session.service                                            │
 │                                                                                                                    │
-│  Nothing was enabled or started. Activate the unit in a coordinated Niri session (README → Usage).                 │
-│  sysc-shell shows Lock only once its config sets { "session": { "locker": "sysc-lock" } }.                         │
-│                                                                                                                    │
 │  >see you space cowboy                                                                                             │
 │                                                                                                                    │
 │  Press Enter to exit                                                                                               │

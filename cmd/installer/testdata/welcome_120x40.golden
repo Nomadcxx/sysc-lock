@@ -13,12 +13,12 @@
 │  Select an option:                                                                                                 │
 │                                                                                                                    │
 │  ▸ Install sysc-lock                                                                                               │
-│      Builds sysc-lock and installs the binary and user unit                                                        │
+│      Builds and installs sysc-lock, then enables its user service                                                  │
 │                                                                                                                    │
 │    Uninstall sysc-lock                                                                                             │
-│      Removes the binary and user unit                                                                              │
+│      Stops the service and removes the binary and user unit                                                        │
 │                                                                                                                    │
-│  Runs as you. Writes only under the prefix; never enables services or edits PAM.                                   │
+│  Runs as you, never as root. Never edits PAM.                                                                      │
 │                                                                                                                    │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 

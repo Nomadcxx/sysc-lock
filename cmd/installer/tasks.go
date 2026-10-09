@@ -70,6 +70,7 @@ type runner struct {
 	failedIdx int
 	errDetail string
 	cmdLine   string
+	activated bool // the session unit is enabled; set by activateService
 }
 
 type runnerState struct {
@@ -355,31 +356,31 @@ func installTasks() []task {
 			}},
 		{name: "Install user unit", description: "Writing sysc-lock-session.service",
 			fn: func(_ context.Context, r *runner, _ func(int, taskStatus)) error {
-				if err := installUnit(r.opts.root, r.opts.prefix); err != nil {
-					return err
-				}
-				for _, o := range runningLockOwners(r.opts.prefix + "/bin/sysc-lock") {
-					r.mu.Lock()
-					r.notes = append(r.notes, fmt.Sprintf(
-						"A running sysc-lock (pid %d) keeps the previous binary until sysc-lock-session.service restarts.", o.pid))
-					r.mu.Unlock()
-				}
-				return nil
+				return installUnit(r.opts.root, r.opts.prefix)
+			}},
+		{name: "Activate service", description: "Enabling and starting sysc-lock-session.service",
+			fn: func(ctx context.Context, r *runner, _ func(int, taskStatus)) error {
+				return activateService(ctx, r)
+			}},
+		{name: "Use with sysc-shell", description: "Making sysc-lock the sysc-shell locker",
+			fn: func(_ context.Context, r *runner, _ func(int, taskStatus)) error {
+				return useWithShell(r)
 			}},
 	}
 }
 
-// uninstallTasks reverses exactly the files an install wrote: the user unit
-// and the binary, plus a stale .new. Directories, user config, runtime state
-// and PAM are never touched.
+// uninstallTasks stops and disables the session unit, then removes exactly the
+// files an install wrote: the user unit and the binary, plus a stale .new.
+// Directories, user config, runtime state and PAM are never touched.
 func uninstallTasks() []task {
 	return []task{
 		{name: "Check prefix", description: "Validating install prefix",
 			fn: func(_ context.Context, r *runner, _ func(int, taskStatus)) error {
 				return validatePrefix(r.opts.prefix)
 			}},
-		{name: "Check service", description: "Checking for a running or enabled sysc-lock",
-			fn: func(_ context.Context, r *runner, _ func(int, taskStatus)) error {
+		{name: "Check service", description: "Stopping and disabling sysc-lock-session.service",
+			fn: func(ctx context.Context, r *runner, _ func(int, taskStatus)) error {
+				stopService(ctx, r)
 				if owners := runningLockOwners(r.opts.prefix + "/bin/sysc-lock"); len(owners) > 0 {
 					return fmt.Errorf("sysc-lock is running (pid %d) from %s: "+
 						"stop sysc-lock-session.service in a coordinated Niri session first",

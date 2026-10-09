@@ -11,6 +11,8 @@
 │    ├─ Copy to bin/sysc-lock.new                                            │
 │    └─ Replace bin/sysc-lock                                                │
 │    Install user unit                                                       │
+│    Activate service                                                        │
+│    Use with sysc-shell                                                     │
 │                                                                            │
 │  Installation failed.                                                      │
 │  Full log: /tmp/sysc-lock-installer.log                                    │
