@@ -6,6 +6,8 @@
 │                                                                            │
 │  Nothing was enabled or started. Activate the unit in a coordinated Niri   │
 │  session (README → Usage).                                                 │
+│  sysc-shell shows Lock only once its config sets { "session": { "locker":  │
+│  "sysc-lock" } }.                                                          │
 │                                                                            │
 │  >see you space cowboy                                                     │
 │                                                                            │

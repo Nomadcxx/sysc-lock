@@ -152,6 +152,7 @@ func (m model) completeBody() string {
 			"Unit:   "+m.installedUnit(),
 			"",
 			note("Nothing was enabled or started. Activate the unit in a coordinated Niri session (README → Usage)."),
+			note(`sysc-shell shows Lock only once its config sets { "session": { "locker": "sysc-lock" } }.`),
 			"")
 	}
 	for _, n := range m.notes() {

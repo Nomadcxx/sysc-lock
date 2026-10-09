@@ -60,6 +60,9 @@ One-liner:
 
     curl -fsSL https://raw.githubusercontent.com/Nomadcxx/sysc-lock/master/install.sh | sh -s -- --yes
 
+The one-liner installs the newest release tag; run it as `... | SYSC_LOCK_REF=master sh -s -- --yes`
+(any tag or branch works) to install something else.
+
 Flags: `--prefix PATH` (default `$HOME/.local`; required when running as root),
 `--candidate PATH` (install a prebuilt binary instead of building),
 `--uninstall` (remove the binary and unit), `--yes` (no prompts), `--log PATH`.
