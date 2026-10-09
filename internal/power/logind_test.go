@@ -19,7 +19,7 @@ type fakeCaller struct {
 	block   chan struct{}
 }
 
-func (f *fakeCaller) Property(n string) (string, error) {
+func (f *fakeCaller) Can(n string) (string, error) {
 	f.calls = append(f.calls, n)
 	if f.propErr != nil {
 		if err, ok := f.propErr[n]; ok {
@@ -165,5 +165,31 @@ func TestDefaultTimeoutIsUsedWhenUnset(t *testing.T) {
 	}
 	if Timeout != 5*time.Second {
 		t.Fatalf("Timeout is %v", Timeout)
+	}
+}
+
+// logind exposes CanReboot and friends as methods, not properties: reading
+// them through Properties.Get fails on every host, which hid every power row
+// but Logout. This asks the real logind when one is reachable.
+func TestDBusCallerAsksLogindCanMethods(t *testing.T) {
+	conn, err := dbus.ConnectSystemBus()
+	if err != nil {
+		t.Skipf("no system bus: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	if err := conn.Object(managerBus, managerPath).Call("org.freedesktop.DBus.Peer.Ping", 0).Err; err != nil {
+		t.Skipf("no logind: %v", err)
+	}
+	c := &DBusCaller{conn: conn}
+	for _, name := range []string{"CanReboot", "CanPowerOff", "CanSuspend", "CanHibernate"} {
+		got, err := c.Can(name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		switch got {
+		case "yes", "no", "challenge", "na":
+		default:
+			t.Fatalf("%s = %q, want a logind answer", name, got)
+		}
 	}
 }
