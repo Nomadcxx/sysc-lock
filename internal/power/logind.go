@@ -34,8 +34,9 @@ const (
 // Caller is the slice of the logind connection the model needs. A fake
 // implements it in tests, so no test touches the bus.
 type Caller interface {
-	// Property reads one login1 manager property, such as CanReboot.
-	Property(name string) (string, error)
+	// Can asks one login1 manager capability method, such as CanReboot, and
+	// returns its answer: yes, no, challenge or na.
+	Can(name string) (string, error)
 	// Method performs one login1 manager call.
 	Method(name string, args ...any) error
 }
@@ -110,8 +111,8 @@ func Check(c Caller) Availability {
 	}
 }
 
-func yes(c Caller, prop string) bool {
-	v, err := c.Property(prop)
+func yes(c Caller, method string) bool {
+	v, err := c.Can(method)
 	return err == nil && v == "yes"
 }
 
@@ -121,20 +122,18 @@ type DBusCaller struct{ conn *dbus.Conn }
 // NewCaller wraps an opened logind connection.
 func NewCaller(l *inhibit.Logind) *DBusCaller { return &DBusCaller{conn: l.Connection()} }
 
-// Property reads one manager property with a bounded context, the same
-// Properties.Get call inhibit already uses.
-func (d *DBusCaller) Property(name string) (string, error) {
+// Can calls one manager capability method with a bounded context. logind
+// publishes CanReboot and the rest as methods; they are not properties, and
+// Properties.Get on them fails with UnknownProperty.
+func (d *DBusCaller) Can(name string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
 	defer cancel()
-	var v dbus.Variant
-	err := d.conn.Object(managerBus, managerPath).CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, managerIface, name).Store(&v)
+	var v string
+	err := d.conn.Object(managerBus, managerPath).CallWithContext(ctx, managerIface+"."+name, 0).Store(&v)
 	if err != nil {
 		return "", classify(name, err)
 	}
-	if s, ok := v.Value().(string); ok {
-		return s, nil
-	}
-	return "", nil
+	return v, nil
 }
 
 // Method performs one manager call with a bounded context. interactive is
