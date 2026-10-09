@@ -28,7 +28,7 @@ import (
 
 // The request command exits 0 after confirmed authenticated unlock; failures exit 1.
 // The persistent owner reports acquisition/unlock outcomes through its snapshots.
-const version = "0.1.0-dev"
+const version = "0.1.0"
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {

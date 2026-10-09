@@ -38,6 +38,13 @@ PAM authentication. It supports Niri and sysc-shell.
 
 Requires libpam headers (`security/pam_appl.h`) because of the cgo PAM binding.
 
+Linux amd64 release assets include `sysc-lock`, `sysc-lock-session.service`
+and `SHA256SUMS`. The binary uses glibc (2.35 or newer), libpam, EGL and GLES
+runtime libraries. The sysc suite installer verifies its pinned checksum,
+installs the binary and enables the session service. Starting the service
+does not acquire a lock; `sysc-lock` requests one.
+
+
 ## Install
 
 The guided installer builds sysc-lock, installs the binary and the user unit, and
