@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpam0g-dev libegl1-mesa-dev libgles2-mesa-dev
+      - name: Build and check release
+        env:
+          CGO_ENABLED: "1"
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          go build -trimpath -ldflags '-s -w' -o dist/sysc-lock ./cmd/sysc-lock
+          dist/sysc-lock --version
+          dist/sysc-lock --describe > /tmp/sysc-lock-description.json
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            test "$(dist/sysc-lock --version)" = "sysc-lock ${GITHUB_REF_NAME#v}"
+          fi
+          cp contrib/systemd/sysc-lock-session.service dist/
+          (cd dist && sha256sum sysc-lock sysc-lock-session.service > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sysc-lock-linux-amd64
+          path: dist/
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --latest \
+            --title "sysc-lock $GITHUB_REF_NAME" \
+            --notes 'Session locker for Niri with PAM authentication, themed effects and sysc-shell theme following. Linux amd64; requires glibc, libpam, EGL and GLES runtime libraries. See README for installation and configuration.'
