@@ -65,16 +65,24 @@ The one-liner installs the newest release tag; run it as `... | SYSC_LOCK_REF=ma
 
 Flags: `--prefix PATH` (default `$HOME/.local`; required when running as root),
 `--candidate PATH` (install a prebuilt binary instead of building),
-`--uninstall` (remove the binary and unit), `--yes` (no prompts), `--log PATH`.
+`--uninstall` (stop the service, remove the binary and unit), `--yes` (no prompts), `--log PATH`.
 Exit codes: `0` complete, `1` a task failed, `2` usage or preflight refusal,
 `130` cancelled.
 
 Building sysc-lock needs the libpam headers, because that step runs with cgo
 enabled; everything else, including `--uninstall`, does not.
 
-The installer writes only under the prefix. It never enables or starts a
-service, never edits PAM, and never uses sudo. `scripts/install` stays available
-and the guided installer runs exactly its steps.
+The installer writes the binary and unit under the prefix, then activates
+them: `systemctl --user enable` for `sysc-lock-session.service`, and a restart
+when Niri is running so the new binary takes over. Outside Niri the service
+starts with the next Niri session. With the default prefix the unit is on the
+user manager's search path; any other prefix skips activation and says how to
+link the unit. Last, if `~/.config/sysc-shell/config.json` names no locker,
+it gains `"session": {"locker": "sysc-lock"}` and, unless `idle.lock` is set
+or the sysc-walls screensaver is enabled, `"idle": {"lock": "5m0s"}`. A locker
+you already chose is left alone. `--uninstall` stops and disables the service
+before removing files. The installer never edits PAM and never uses sudo.
+`scripts/install` still installs files only.
 
 ## Usage
 

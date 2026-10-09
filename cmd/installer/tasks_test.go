@@ -94,13 +94,14 @@ func TestRunnerBuildSuccessThenInstall(t *testing.T) {
 		t.Error("buildDir not cleaned")
 	}
 	st := r.snapshot()
+	if len(st.status) != 9 {
+		t.Fatalf("task count = %d", len(st.status))
+	}
+	// TestMain's user manager never answers, so activation skips.
 	for i, s := range st.status {
-		if s != statusDone {
+		if want := statusDone; i >= 7 && s != statusSkipped || i < 7 && s != want {
 			t.Errorf("task %d status = %v", i, s)
 		}
-	}
-	if len(st.status) != 7 {
-		t.Errorf("task count = %d", len(st.status))
 	}
 }
 

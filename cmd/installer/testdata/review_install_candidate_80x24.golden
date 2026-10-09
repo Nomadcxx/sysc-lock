@@ -7,8 +7,9 @@
 │    /home/test/.local/bin/sysc-lock                                         │
 │    /home/test/.local/share/systemd/user/sysc-lock-session.service          │
 │                                                                            │
-│  Change with --prefix PATH. Nothing is enabled or started; PAM and config  │
-│  are untouched.                                                            │
+│  Change with --prefix PATH. Then enables the service (restarting it        │
+│  inside Niri) and sets it as the sysc-shell locker if none is set. PAM is  │
+│  untouched.                                                                │
 ╰────────────────────────────────────────────────────────────────────────────╯
 
                  Enter: Install  •  Esc: Back  •  Ctrl+C: Quit                  

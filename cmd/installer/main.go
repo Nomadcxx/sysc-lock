@@ -39,8 +39,9 @@ var ttyOK = func() bool {
 
 func usage(w io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(w, "usage: sysc-lock-installer [flags]")
-	fmt.Fprintln(w, "\nInstall or remove sysc-lock and its user unit. Writes only under the")
-	fmt.Fprintln(w, "prefix; never enables a service and never edits PAM.")
+	fmt.Fprintln(w, "\nInstall or remove sysc-lock and its user unit. Install enables the unit")
+	fmt.Fprintln(w, "through systemctl --user and makes sysc-lock the sysc-shell locker when")
+	fmt.Fprintln(w, "none is set. Never runs as root and never edits PAM.")
 	fmt.Fprintln(w)
 	fs.SetOutput(w)
 	fs.PrintDefaults()
@@ -179,6 +180,9 @@ func printSummary(m model, stdout, stderr io.Writer) {
 		fmt.Fprintln(stdout, "sysc-lock installer: uninstall complete")
 	case m.exitCode == exitOK:
 		fmt.Fprintf(stdout, "sysc-lock installer: install complete: %s, %s\n", m.installedBinary(), m.installedUnit())
+		for _, n := range m.notes() {
+			fmt.Fprintf(stdout, "  %s\n", n)
+		}
 	case m.cancelled:
 		fmt.Fprintf(stderr, "sysc-lock installer: %s cancelled (log: %s)\n", modeName(m.opts), m.logPath())
 	default:

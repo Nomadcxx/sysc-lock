@@ -102,8 +102,8 @@ func (m model) trunc(s string, prefix int) string {
 }
 
 func (m model) welcomeBody() string {
-	sel, selDesc := "▸ Install sysc-lock", "    Builds sysc-lock and installs the binary and user unit"
-	other, otherDesc := "  Uninstall sysc-lock", "    Removes the binary and user unit"
+	sel, selDesc := "▸ Install sysc-lock", "    Builds and installs sysc-lock, then enables its user service"
+	other, otherDesc := "  Uninstall sysc-lock", "    Stops the service and removes the binary and user unit"
 	if m.opts.uninstall {
 		sel, selDesc, other, otherDesc = other, otherDesc, sel, selDesc
 	}
@@ -116,7 +116,7 @@ func (m model) welcomeBody() string {
 		other,
 		otherDesc,
 		"",
-		note("Runs as you. Writes only under the prefix; never enables services or edits PAM."),
+		note("Runs as you, never as root. Never edits PAM."),
 	}, "\n")
 }
 
@@ -137,8 +137,16 @@ func (m model) reviewBody() string {
 		"  " + m.installedBinary(),
 		"  " + m.installedUnit(),
 		"",
-		note("Change with --prefix PATH. Nothing is enabled or started; PAM and config are untouched."),
+		note(m.reviewNote()),
 	}, "\n")
+}
+
+func (m model) reviewNote() string {
+	if m.opts.uninstall {
+		return "Change with --prefix PATH. Stops and disables the service first; PAM and config are untouched."
+	}
+	return "Change with --prefix PATH. Then enables the service (restarting it inside Niri) and sets it as " +
+		"the sysc-shell locker if none is set. PAM is untouched."
 }
 
 func (m model) completeBody() string {
@@ -150,9 +158,6 @@ func (m model) completeBody() string {
 			bold("Installation complete."),
 			"Binary: "+m.installedBinary(),
 			"Unit:   "+m.installedUnit(),
-			"",
-			note("Nothing was enabled or started. Activate the unit in a coordinated Niri session (README → Usage)."),
-			note(`sysc-shell shows Lock only once its config sets { "session": { "locker": "sysc-lock" } }.`),
 			"")
 	}
 	for _, n := range m.notes() {

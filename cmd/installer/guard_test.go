@@ -33,7 +33,8 @@ func TestPinnedUIModules(t *testing.T) {
 }
 
 // The installer is a user-scope tool: it must never reach for a privilege
-// escalation path or edit PAM.
+// escalation path or edit PAM, and it reaches systemd only through userCtl,
+// which is pinned to the user's own manager.
 func TestInstallerNeverTouchesSystem(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -57,13 +58,25 @@ func TestInstallerNeverTouchesSystem(t *testing.T) {
 	}
 	files["install.sh"] = string(sh)
 
-	for _, banned := range []string{"systemctl", "/etc/pam.d", "sudo ", "pkexec", "doas"} {
+	const seam = `"systemctl", append([]string{"--user"}`
+	if n := strings.Count(strings.Join(mapValues(files), "\n"), `"systemctl"`); n != 1 || !strings.Contains(files["activate.go"], seam) {
+		t.Errorf("systemctl is run %d times; the only allowed call is userCtl's %s", n, seam)
+	}
+	for _, banned := range []string{"/etc/pam.d", "sudo ", "pkexec", "doas"} {
 		for name, body := range files {
 			if strings.Contains(body, banned) {
 				t.Errorf("%s contains %q", name, banned)
 			}
 		}
 	}
+}
+
+func mapValues(m map[string]string) []string {
+	var out []string
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out
 }
 
 // The installer must build anywhere: no internal packages (cgo, PAM), no PAM.

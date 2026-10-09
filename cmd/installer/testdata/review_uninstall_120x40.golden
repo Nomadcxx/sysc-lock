@@ -17,7 +17,7 @@
 │    /home/test/.local/bin/sysc-lock                                                                                 │
 │    /home/test/.local/share/systemd/user/sysc-lock-session.service                                                  │
 │                                                                                                                    │
-│  Change with --prefix PATH. Nothing is enabled or started; PAM and config are untouched.                           │
+│  Change with --prefix PATH. Stops and disables the service first; PAM and config are untouched.                    │
 │                                                                                                                    │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
