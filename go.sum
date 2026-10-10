@@ -16,6 +16,8 @@ github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261008172631-0157cbfe0ea0 h1:wtYV6q
 github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261008172631-0157cbfe0ea0/go.mod h1:vJUvbNqGP17it0ApwCaR6pzt0WEkaqfMaZ4pdEhDk7Y=
 github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261010103928-1008193d8e98 h1:idJwzPlOgmONAxdCqnRu65Wr3gDKBAmpBQo12Fx5fHo=
 github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261010103928-1008193d8e98/go.mod h1:vJUvbNqGP17it0ApwCaR6pzt0WEkaqfMaZ4pdEhDk7Y=
+github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261010110837-500c55c8e958 h1:7/nLugoSKKys9xBwGJKMvLTYdI5cqq+IZ02SnOfWS1c=
+github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261010110837-500c55c8e958/go.mod h1:vJUvbNqGP17it0ApwCaR6pzt0WEkaqfMaZ4pdEhDk7Y=
 github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1 h1:b/fota81Abko+zPV8AhLKp4kvLtJhz9R/sCNntG6iZ8=
 github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1/go.mod h1:ZNAe41EM7R5G2KA55jqMPotAvrjVWcMq21BV69gROKA=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=

@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/Nomadcxx/sysc-Go v1.0.6-0.20261008172414-1ff1f6c3c8d0
-	github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261010103928-1008193d8e98
+	github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261010110837-500c55c8e958
 	github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
