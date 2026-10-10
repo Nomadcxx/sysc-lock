@@ -842,8 +842,11 @@ func TestParityWarningsAndScreensaverFitCompactOutputs(t *testing.T) {
 				t.Fatal("feedback overlaps")
 			}
 			saver := ScreensaverLayout(size[0], size[1], 1, style, widestClock)
-			if saver.Logo.Empty() || saver.Banner.Empty() || saver.ClockBox.Empty() || saver.Date.Empty() || !saver.Bounds().In(output) {
+			if saver.Banner.Empty() || saver.ClockBox.Empty() || saver.Date.Empty() || !saver.Bounds().In(output) {
 				t.Fatalf("%v %s incomplete saver: %+v", size, style, saver)
+			}
+			if !saver.Logo.Empty() || !saver.Header.Empty() {
+				t.Fatal("screensaver draws header artwork")
 			}
 			if !saver.Entry.Empty() || !saver.Frame.Empty() {
 				t.Fatal("screensaver exposes form")

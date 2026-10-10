@@ -226,13 +226,13 @@ func LayoutHeader(width, height int, scale float64, styleName, clockText string,
 	return s
 }
 
-// ScreensaverLayout retains the larger idle clock and wordmark without the form.
+// ScreensaverLayout is the idle banner, larger clock and date: no form and no
+// header artwork.
 func ScreensaverLayout(width, height int, scale float64, style, text string) Scene {
 	s := Layout(width, height, scale, style, text)
 	corner, captionW := s.Corner, s.Caption.Dx()
 	gap := max(4, int(8*s.Scale))
 	bannerH := max(16, int(22*s.Scale))
-	logoW, logoH := logoSize(width, height, s.Scale)
 	chosen, rows, cw := art.Pick(style, text, width, height)
 	if !chosen.Plain() {
 		cw = max(art.MinCell, cw*3/4)
@@ -244,22 +244,13 @@ func ScreensaverLayout(width, height int, scale float64, style, text string) Sce
 	}
 	s.DateSize = max(24, int(24*s.Scale))
 	dateH := s.DateSize * 3 / 2
-	total := logoH + clockH + dateH + bannerH + 3*gap
-	if total > height-2*gap {
-		logoH, logoW = 0, 0
-		total = clockH + dateH + bannerH + 2*gap
-	}
+	total := clockH + dateH + bannerH + 2*gap
 	if total > height-2*gap {
 		dateH = 0
 		total = clockH + bannerH + gap
 	}
 	s = Scene{Scale: s.Scale, Cell: s.Cell, Clock: s.Clock, ClockCW: s.ClockCW, DateSize: s.DateSize}
 	y := max(gap, (height-total)/2)
-	if logoH > 0 {
-		s.Logo = image.Rect((width-logoW)/2, y, (width+logoW)/2, y+logoH)
-		s.Header = s.Logo
-		y += logoH + gap
-	}
 	s.Banner = image.Rect(gap, y, width-gap, y+bannerH)
 	y += bannerH + gap
 	s.ClockBox = image.Rect((width-clockW)/2, y, (width+clockW)/2, y+clockH)
@@ -276,19 +267,4 @@ func ScreensaverLayout(width, height int, scale float64, style, text string) Sce
 		s.Corner = corner
 	}
 	return s
-}
-
-func logoSize(width, height int, scale float64) (int, int) {
-	px := func(n int) int { return max(1, int(float64(n)*scale)) }
-	margin := px(8)
-	logoW := min(width*9/10, max(1, width-2*margin))
-	logoH := logoW * art.LogoH / art.LogoW
-	if capH := max(1, height/5); logoH > capH {
-		logoH = capH
-		logoW = logoH * art.LogoW / art.LogoH
-	}
-	if logoH < px(16) || logoW < px(64) {
-		logoH, logoW = 0, 0
-	}
-	return logoW, logoH
 }
