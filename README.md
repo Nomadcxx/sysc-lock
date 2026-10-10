@@ -10,10 +10,9 @@
 A Wayland session locker for sysc-shell, with compositor-enforced locking and in-process
 PAM authentication. It supports Niri and sysc-shell.
 
-<p align="center">
-  <img src="assets/hero.png" alt="The sysc-lock lock screen with the fire effect and the Eldritch palette" width="900"><br>
-  <sub>Fire effect, Eldritch palette, rendered with <code>sysc-lock --preview</code> at 1920×1080. <a href="assets/tour.mp4">Watch the four-theme video</a> (1536×864, 56 s).</sub>
-</p>
+https://github.com/user-attachments/assets/f55b48ab-c9b5-496f-a4f0-c5db5f1aacf1
+
+<p align="center"><sub>Four lock-screen themes rendered by sysc-lock: fire, matrix, aquarium and sonar (1536×864, 56 s). <a href="assets/tour.mp4">Download the file</a>. Stills at 1920×1080 are below.</sub></p>
 
 ## Quick Links
 
