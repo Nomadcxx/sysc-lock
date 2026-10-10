@@ -27,6 +27,18 @@ func DefaultHeaders() []Header {
 	return hs
 }
 
+// Extent is the widest and tallest artwork, in character cells.
+func Extent(hs []Header) (cols, rows int) {
+	for _, h := range hs {
+		lines := strings.Split(h.Text, "\n")
+		rows = max(rows, len(lines))
+		for _, l := range lines {
+			cols = max(cols, runewidth.StringWidth(l))
+		}
+	}
+	return cols, rows
+}
+
 // ParseHeaders preserves literal artwork inside greet-style triple quotes.
 func ParseHeaders(data string) ([]Header, error) {
 	if len(data) > MaxHeaderBytes || !utf8.ValidString(data) {

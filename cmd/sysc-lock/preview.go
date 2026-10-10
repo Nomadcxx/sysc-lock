@@ -59,6 +59,7 @@ func runPreview(in io.Reader, out io.Writer) error {
 			headers = custom
 		}
 	}
+	view.HeaderCols, view.HeaderRows = art.Extent(headers)
 	view.Header = headers[0].Text
 	for _, h := range headers {
 		if h.ID == req.Config.Header {

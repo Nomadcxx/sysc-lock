@@ -17,7 +17,10 @@ type Scene struct {
 	// Logo and clock share the form's bounded column. Frame and Rule are
 	// decorative; compact outputs retain credentials and failure feedback.
 	Logo, Header image.Rectangle
-	Frame, Rule  image.Rectangle
+	// HeaderPx is the font size that draws the header artwork at true size;
+	// zero when the slot is the fixed logo slot.
+	HeaderPx    int
+	Frame, Rule image.Rectangle
 	// Label is the left-aligned field name above the entry row, greet-style;
 	// it survives the decorative frame when the output is compact.
 	Label, Identity image.Rectangle
@@ -52,6 +55,14 @@ func (s Scene) Bounds() image.Rectangle {
 // plain, rather than overflow. On short outputs rows drop in this order:
 // logo, caption, frame and identity, date, clock, help.
 func Layout(width, height int, scale float64, styleName, clockText string, attempts ...int) Scene {
+	return LayoutHeader(width, height, scale, styleName, clockText, 0, 0, attempts...)
+}
+
+// LayoutHeader is Layout with the header slot sized to headerCols by headerRows
+// character cells of artwork, the largest in the catalogue so that cycling
+// headers never moves the form. The artwork keeps its true 16px-at-scale size
+// and shrinks only as far as the output needs to keep the password form.
+func LayoutHeader(width, height int, scale float64, styleName, clockText string, headerCols, headerRows int, attempts ...int) Scene {
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
 	}
@@ -106,8 +117,19 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	// Reserve failure feedback before dropping decoration so rejection never
 	// changes which rows fit or moves the password field.
 	fits := func() bool { return total()+3*lineH-attemptH-warningH <= height-2*margin }
+	headerW, headerPx := columnW, 0
+	if headerCols > 0 && headerRows > 0 {
+		for headerPx = px(16); ; headerPx-- {
+			cw, ch, _ := cellSize(headerPx)
+			headerW, logoH = headerCols*cw, headerRows*ch
+			if headerPx <= px(8) || headerW <= width-2*margin && fits() {
+				break
+			}
+		}
+		headerW = min(max(headerW, columnW), max(1, width-2*margin))
+	}
 	if !fits() {
-		logoH, logoW = 0, 0
+		logoH, logoW, headerPx = 0, 0, 0
 	}
 	if !fits() {
 		captionH, captionGap = 0, 0
@@ -129,7 +151,8 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	// unless a compact output needs the space to keep feedback on screen.
 	y := max(margin, min((height-total()+attemptH+warningH)/2, height-margin-(total()-attemptH-warningH+3*lineH)))
 	if logoH > 0 {
-		s.Header = image.Rect((width-columnW)/2, y, (width+columnW)/2, y+logoH)
+		s.Header = image.Rect((width-headerW)/2, y, (width+headerW)/2, y+logoH)
+		s.HeaderPx = headerPx
 		legacyH := logoW * art.LogoH / art.LogoW
 		s.Logo = image.Rect((width-logoW)/2, y+(logoH-legacyH)/2, (width+logoW)/2, y+(logoH+legacyH)/2)
 		y += logoH + logoGap

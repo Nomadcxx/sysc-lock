@@ -104,6 +104,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	if headersErr != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock: invalid headers.conf; using shipped artwork")
 	}
+	view.HeaderCols, view.HeaderRows = art.Extent(headers)
 	headerIDs := make([]string, len(headers))
 	for i, h := range headers {
 		headerIDs[i] = h.ID

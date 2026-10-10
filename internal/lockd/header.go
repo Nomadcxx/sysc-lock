@@ -7,6 +7,7 @@ import (
 
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-terminal/renderer"
+	"github.com/mattn/go-runewidth"
 )
 
 type headerConfig struct {
@@ -18,24 +19,28 @@ func (v *View) animateHeader() bool {
 	return v.Header != "" && v.TextEffect != "" && v.TextEffect != "none" && !v.Reduced && !v.Terminal() && !v.Busy && v.Prompt == "" && v.Powering == "" && (v.Entry == nil || len(v.Entry.Pass) == 0)
 }
 
-func (v *View) drawHeader(fb *render.Framebuffer, box image.Rectangle, now time.Time) {
+func (v *View) drawHeader(fb *render.Framebuffer, box image.Rectangle, px int, now time.Time) {
 	if box.Empty() {
 		return
 	}
 	rows := strings.Split(v.Header, "\n")
-	width := 1
-	for _, row := range rows {
-		width = max(width, len([]rune(row)))
+	// A sized slot (the lock screen) draws terminal cells like greet; the fixed
+	// logo slot (the screensaver) fits glyph text inside it.
+	cells := px > 0
+	if !cells {
+		width := 1
+		for _, row := range rows {
+			width = max(width, len([]rune(row)))
+		}
+		px = max(1, min(int(16*max(1, v.Scale)), box.Dy()*2/(max(4, len(rows))*3), box.Dx()/max(21, width)))
 	}
-	// Leave space for moving text while keeping every artwork in the same slot.
-	px := max(1, min(int(16*max(1, v.Scale)), box.Dy()*2/(max(4, len(rows))*3), box.Dx()/max(21, width)))
 	if v.animateHeader() {
 		cfg := headerConfig{v.Header, v.TextEffect, v.TextPalette, box.Dx(), box.Dy(), px}
 		if cfg != v.headerConfig {
 			v.headerConfig = cfg
 			// ponytail: one bounded surface cache; differing multi-output sizes rebuild it.
 			// Add per-output caches only when multi-output header demand is measured.
-			v.headerRenderer, _ = renderer.New(renderer.Config{Text: cfg.text, Effect: cfg.effect, Palette: cfg.palette, Width: cfg.width, Height: cfg.height, PixelSize: cfg.px})
+			v.headerRenderer, _ = renderer.New(renderer.Config{Text: cfg.text, Effect: cfg.effect, Palette: cfg.palette, Width: cfg.width, Height: cfg.height, PixelSize: cfg.px, Font: fontPath()})
 			v.headerPixels = make([]byte, box.Dx()*box.Dy()*4)
 			v.headerStep = time.Time{}
 		}
@@ -66,6 +71,16 @@ func (v *View) drawHeader(fb *render.Framebuffer, box image.Rectangle, now time.
 			}
 		}
 	}
+	ink := v.artInk(v.banner(), 3)
+	if cells {
+		cw, ch, _ := cellSize(px)
+		cols := 0
+		for _, row := range rows {
+			cols = max(cols, runewidth.StringWidth(row))
+		}
+		drawCells(fb, box, image.Pt(box.Min.X+(box.Dx()-cols*cw)/2, box.Min.Y+(box.Dy()-ch*len(rows))/2), rows, px, ink)
+		return
+	}
 	// Static artwork shares one left edge, preserving leading spaces and shape.
 	blockW := 0
 	for _, row := range rows {
@@ -73,7 +88,6 @@ func (v *View) drawHeader(fb *render.Framebuffer, box image.Rectangle, now time.
 	}
 	lineH := max(1, px*3/2)
 	x, y := box.Min.X+(box.Dx()-blockW)/2, box.Min.Y+(box.Dy()-lineH*len(rows))/2
-	ink := v.artInk(v.banner(), 3)
 	for i, row := range rows {
 		line := image.Rect(x, y+i*lineH, box.Max.X, y+(i+1)*lineH).Intersect(box)
 		drawTextBoxLeft(fb, line, line.Min.Y+px, row, px, ink)

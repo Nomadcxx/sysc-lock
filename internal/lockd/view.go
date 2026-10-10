@@ -38,13 +38,16 @@ type View struct {
 	Reveal                          input.Reveal
 	StyleName                       string // clock style; unknown names fall back in art.Pick
 	Header, TextEffect, TextPalette string
-	headerBox                       image.Rectangle
-	headerConfig                    headerConfig
-	headerRenderer                  *renderer.Renderer
-	headerPixels                    []byte
-	headerStep                      time.Time
-	Clock24                         bool
-	Reduced                         bool // no print reveal and no jolt
+	// HeaderCols and HeaderRows are the largest artwork in the catalogue; zero
+	// keeps the fixed logo-sized slot.
+	HeaderCols, HeaderRows int
+	headerBox              image.Rectangle
+	headerConfig           headerConfig
+	headerRenderer         *renderer.Renderer
+	headerPixels           []byte
+	headerStep             time.Time
+	Clock24                bool
+	Reduced                bool // no print reveal and no jolt
 	// Power is nil when no action is available. Hint is the strip text,
 	// handed in by the owner so this package does not import power.
 	Power *PowerView
@@ -263,7 +266,7 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	}
 	text := v.clockText(now)
 	screensaver := v.Screensaver(now)
-	s := Layout(fb.Width, fb.Height, v.Scale, v.StyleName, text, v.Attempts)
+	s := LayoutHeader(fb.Width, fb.Height, v.Scale, v.StyleName, text, v.HeaderCols, v.HeaderRows, v.Attempts)
 	if screensaver {
 		s = ScreensaverLayout(fb.Width, fb.Height, v.Scale, v.StyleName, text)
 	}
@@ -272,7 +275,7 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	if v.Header == "" {
 		v.drawLogo(fb, s.Logo, v.artInk(v.banner(), 3))
 	} else {
-		v.drawHeader(fb, s.Header, now)
+		v.drawHeader(fb, s.Header, s.HeaderPx, now)
 	}
 	if screensaver {
 		drawTextBox(fb, s.Banner, s.Banner.Min.Y+s.Banner.Dy()*3/4, "// SEE YOU SPACE COWBOY //", v.textPx(s.Banner.Dy()*3/5, s.Banner), v.artInk(v.banner(), 4.5))

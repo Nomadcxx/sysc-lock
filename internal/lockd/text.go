@@ -41,12 +41,21 @@ var fontPaths = []string{
 }
 
 func fontBytes() []byte {
-	for _, p := range fontPaths {
-		if b, err := os.ReadFile(p); err == nil {
-			return b
-		}
+	if b, err := os.ReadFile(fontPath()); err == nil {
+		return b
 	}
 	return gomono.TTF
+}
+
+// fontPath is the system font the lock screen draws with, or "" for the
+// embedded Go Mono. Header effects render with it so their cells match.
+func fontPath() string {
+	for _, p := range fontPaths {
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			return p
+		}
+	}
+	return ""
 }
 
 func face(px int) font.Face {
