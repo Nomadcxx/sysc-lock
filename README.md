@@ -77,6 +77,8 @@ does not acquire a lock; `sysc-lock` requests one.
 
 ## Install
 
+### Guided Go installer (recommended)
+
 The guided installer builds sysc-lock, installs the binary and the user unit, and
 can undo both:
 
@@ -113,6 +115,21 @@ or the sysc-walls screensaver is enabled, `"idle": {"lock": "5m0s"}`. A locker
 you already chose is left alone. `--uninstall` stops and disables the service
 before removing files. The installer never edits PAM and never uses sudo.
 `scripts/install` still installs files only.
+
+### AUR
+
+On Arch, install [sysc-lock](https://aur.archlinux.org/packages/sysc-lock) with
+your AUR helper:
+
+```sh
+yay -S sysc-lock
+systemctl --user enable --now sysc-lock-session.service
+```
+
+Run the service command inside a Niri session started with `niri-session`.
+Starting the session owner does not lock the screen.
+
+[Documentation](https://nomadcxx.github.io/sysc/docs/).
 
 ## Usage
 
@@ -315,6 +332,10 @@ each connection, socket and version pin.
 
 - [The sysc ecosystem](https://github.com/Nomadcxx/sysc-shell/blob/main/docs/ecosystem.md)
 - [sysc-shell](https://github.com/Nomadcxx/sysc-shell) — the shell that spawns and tracks the locker
+
+## License
+
+BSD-3-Clause. See [LICENSE](LICENSE).
 
 ---
 
