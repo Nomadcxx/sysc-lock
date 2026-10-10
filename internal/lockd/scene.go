@@ -60,8 +60,9 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 
 // LayoutHeader is Layout with the header slot sized to headerCols by headerRows
 // character cells of artwork, the largest in the catalogue so that cycling
-// headers never moves the form. The artwork keeps its true 16px-at-scale size
-// and shrinks only as far as the output needs to keep the password form.
+// headers never moves the form. Like greet, where art and form share one cell
+// grid, the artwork fits the form column: at most 16px at scale, shrinking
+// until it is no wider than the form and the output still fits the form.
 func LayoutHeader(width, height int, scale float64, styleName, clockText string, headerCols, headerRows int, attempts ...int) Scene {
 	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
@@ -122,7 +123,7 @@ func LayoutHeader(width, height int, scale float64, styleName, clockText string,
 		for headerPx = px(16); ; headerPx-- {
 			cw, ch, _ := cellSize(headerPx)
 			headerW, logoH = headerCols*cw, headerRows*ch
-			if headerPx <= px(8) || headerW <= width-2*margin && fits() {
+			if headerPx <= px(8) || headerW <= columnW && fits() {
 				break
 			}
 		}
