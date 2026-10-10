@@ -17,6 +17,7 @@ PAM authentication. It supports Niri and sysc-shell.
 
 ## Quick Links
 
+- [Documentation site](https://nomadcxx.github.io/sysc/docs/components/sysc-lock/)
 - [Usage](#usage)
 - [The sysc ecosystem](https://github.com/Nomadcxx/sysc-shell/blob/main/docs/ecosystem.md)
 
