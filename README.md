@@ -11,8 +11,8 @@ A Wayland session locker for sysc-shell, with compositor-enforced locking and in
 PAM authentication. It supports Niri and sysc-shell.
 
 <p align="center">
-  <img src="assets/tour.webp" alt="sysc-lock showing four lock screen themes: fire, matrix, aquarium and sonar" width="800"><br>
-  <sub>Four lock-screen themes, rendered by sysc-lock. <a href="assets/tour.mp4">Full-quality video</a></sub>
+  <img src="assets/hero.png" alt="The sysc-lock lock screen with the fire effect and the Eldritch palette" width="900"><br>
+  <sub>Fire effect, Eldritch palette, rendered with <code>sysc-lock --preview</code> at 1920×1080. <a href="assets/tour.mp4">Watch the four-theme video</a> (1536×864, 56 s).</sub>
 </p>
 
 ## Quick Links
@@ -27,16 +27,16 @@ Rendered with `sysc-lock --preview`, so no session was locked to capture them.
 
 <table>
   <tr>
-    <td align="center" valign="top"><img src="assets/screens/lock-fire-eldritch.webp" alt="Fire, Eldritch" width="396"><br><sub>Fire, Eldritch</sub></td>
-    <td align="center" valign="top"><img src="assets/screens/lock-matrix-nord.webp" alt="Matrix, Nord" width="396"><br><sub>Matrix, Nord</sub></td>
+    <td align="center" valign="top"><img src="assets/screens/lock-fire-eldritch.png" alt="Fire, Eldritch" width="396"><br><sub>Fire, Eldritch</sub></td>
+    <td align="center" valign="top"><img src="assets/screens/lock-matrix-nord.png" alt="Matrix, Nord" width="396"><br><sub>Matrix, Nord</sub></td>
   </tr>
   <tr>
-    <td align="center" valign="top"><img src="assets/screens/lock-aquarium-catppuccin-mocha.webp" alt="Aquarium, Catppuccin Mocha" width="396"><br><sub>Aquarium, Catppuccin Mocha</sub></td>
-    <td align="center" valign="top"><img src="assets/screens/lock-beams-dracula.webp" alt="Beams, Dracula" width="396"><br><sub>Beams, Dracula</sub></td>
+    <td align="center" valign="top"><img src="assets/screens/lock-aquarium-catppuccin-mocha.png" alt="Aquarium, Catppuccin Mocha" width="396"><br><sub>Aquarium, Catppuccin Mocha</sub></td>
+    <td align="center" valign="top"><img src="assets/screens/lock-beams-dracula.png" alt="Beams, Dracula" width="396"><br><sub>Beams, Dracula</sub></td>
   </tr>
   <tr>
-    <td align="center" valign="top"><img src="assets/screens/lock-cracktro-amber.webp" alt="Cracktro, Amber" width="396"><br><sub>Cracktro, Amber</sub></td>
-    <td align="center" valign="top"><img src="assets/screens/lock-logo-morph-purple.webp" alt="Logo morph, Purple" width="396"><br><sub>Logo morph, Purple</sub></td>
+    <td align="center" valign="top"><img src="assets/screens/lock-sysc-logo-eldritch.png" alt="SYSC logo, Eldritch" width="396"><br><sub>SYSC logo, Eldritch</sub></td>
+    <td align="center" valign="top"><img src="assets/screens/lock-logo-morph-purple.png" alt="Logo morph, Purple" width="396"><br><sub>Logo morph, Purple</sub></td>
   </tr>
 </table>
 
