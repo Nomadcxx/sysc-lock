@@ -10,34 +10,20 @@
 A Wayland session locker for sysc-shell, with compositor-enforced locking and in-process
 PAM authentication. It supports Niri and sysc-shell.
 
-https://github.com/user-attachments/assets/f55b48ab-c9b5-496f-a4f0-c5db5f1aacf1
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="assets/screens/lock-main.png" alt="The sysc-lock main screen" width="480"><br><sub>The lock screen, with the blurred desktop backdrop</sub></td>
+    <td align="center" valign="top"><img src="assets/screens/lock-cross-logo.png" alt="sysc-lock with the cross-logo background effect" width="480"><br><sub>The cross-logo background effect</sub></td>
+  </tr>
+</table>
 
-<p align="center"><sub>Four lock-screen themes rendered by sysc-lock: fire, matrix, aquarium and sonar (1536×864, 56 s). <a href="assets/tour.mp4">Download the file</a>. Stills at 1920×1080 are below.</sub></p>
+<p align="center"><sub>Captured from the running lock at 1920×1080, void palette.</sub></p>
 
 ## Quick Links
 
 - [Documentation site](https://nomadcxx.github.io/sysc/docs/components/sysc-lock/)
 - [Usage](#usage)
 - [The sysc ecosystem](https://github.com/Nomadcxx/sysc-shell/blob/main/docs/ecosystem.md)
-
-## Screenshots
-
-Rendered with `sysc-lock --preview`, so no session was locked to capture them.
-
-<table>
-  <tr>
-    <td align="center" valign="top"><img src="assets/screens/lock-fire-eldritch.png" alt="Fire, Eldritch" width="396"><br><sub>Fire, Eldritch</sub></td>
-    <td align="center" valign="top"><img src="assets/screens/lock-matrix-nord.png" alt="Matrix, Nord" width="396"><br><sub>Matrix, Nord</sub></td>
-  </tr>
-  <tr>
-    <td align="center" valign="top"><img src="assets/screens/lock-aquarium-catppuccin-mocha.png" alt="Aquarium, Catppuccin Mocha" width="396"><br><sub>Aquarium, Catppuccin Mocha</sub></td>
-    <td align="center" valign="top"><img src="assets/screens/lock-beams-dracula.png" alt="Beams, Dracula" width="396"><br><sub>Beams, Dracula</sub></td>
-  </tr>
-  <tr>
-    <td align="center" valign="top"><img src="assets/screens/lock-sysc-logo-eldritch.png" alt="SYSC logo, Eldritch" width="396"><br><sub>SYSC logo, Eldritch</sub></td>
-    <td align="center" valign="top"><img src="assets/screens/lock-logo-morph-purple.png" alt="Logo morph, Purple" width="396"><br><sub>Logo morph, Purple</sub></td>
-  </tr>
-</table>
 
 ## Security model
 
