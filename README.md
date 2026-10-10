@@ -1,13 +1,43 @@
 
-![sysc-lock](assets/wordmark.png)
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/wordmark.png">
+    <img src="assets/wordmark-light.png" alt="sysc-lock" height="64">
+  </picture>
+</p>
+
 
 A Wayland session locker for sysc-shell, with compositor-enforced locking and in-process
 PAM authentication. It supports Niri and sysc-shell.
+
+<p align="center">
+  <img src="assets/tour.webp" alt="sysc-lock showing four lock screen themes: fire, matrix, aquarium and sonar" width="800"><br>
+  <sub>Four lock-screen themes, rendered by sysc-lock. <a href="assets/tour.mp4">Full-quality video</a></sub>
+</p>
 
 ## Quick Links
 
 - [Usage](#usage)
 - [The sysc ecosystem](https://github.com/Nomadcxx/sysc-shell/blob/main/docs/ecosystem.md)
+
+## Screenshots
+
+Rendered with `sysc-lock --preview`, so no session was locked to capture them.
+
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="assets/screens/lock-fire-eldritch.webp" alt="Fire, Eldritch" width="396"><br><sub>Fire, Eldritch</sub></td>
+    <td align="center" valign="top"><img src="assets/screens/lock-matrix-nord.webp" alt="Matrix, Nord" width="396"><br><sub>Matrix, Nord</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top"><img src="assets/screens/lock-aquarium-catppuccin-mocha.webp" alt="Aquarium, Catppuccin Mocha" width="396"><br><sub>Aquarium, Catppuccin Mocha</sub></td>
+    <td align="center" valign="top"><img src="assets/screens/lock-beams-dracula.webp" alt="Beams, Dracula" width="396"><br><sub>Beams, Dracula</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top"><img src="assets/screens/lock-cracktro-amber.webp" alt="Cracktro, Amber" width="396"><br><sub>Cracktro, Amber</sub></td>
+    <td align="center" valign="top"><img src="assets/screens/lock-logo-morph-purple.webp" alt="Logo morph, Purple" width="396"><br><sub>Logo morph, Purple</sub></td>
+  </tr>
+</table>
 
 ## Security model
 
