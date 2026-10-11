@@ -43,6 +43,59 @@ func TestReadBatteryFindsFirstBattery(t *testing.T) {
 	}
 }
 
+func TestReadBatterySkipsDeviceBattery(t *testing.T) {
+	fs := mapFS{
+		files: map[string]string{
+			"/ps/headset/type":     "Battery\n",
+			"/ps/headset/scope":    "Device\n",
+			"/ps/headset/present":  "1\n",
+			"/ps/headset/capacity": "22\n",
+			"/ps/headset/status":   "Discharging\n",
+		},
+		dirs: map[string][]string{"/ps": {"headset"}},
+	}
+	if _, _, ok := ReadBattery(fs, "/ps"); ok {
+		t.Fatal("device battery must not be reported as the system battery")
+	}
+}
+
+func TestReadBatterySkipsDeviceBatteryBeforeSystemBattery(t *testing.T) {
+	fs := mapFS{
+		files: map[string]string{
+			"/ps/headset/type":     "Battery\n",
+			"/ps/headset/scope":    "Device\n",
+			"/ps/headset/present":  "1\n",
+			"/ps/headset/capacity": "22\n",
+			"/ps/headset/status":   "Discharging\n",
+			"/ps/BAT0/type":        "Battery\n",
+			"/ps/BAT0/scope":       "System\n",
+			"/ps/BAT0/present":     "1\n",
+			"/ps/BAT0/capacity":    "71\n",
+			"/ps/BAT0/status":      "Charging\n",
+		},
+		dirs: map[string][]string{"/ps": {"headset", "BAT0"}},
+	}
+	pct, power, ok := ReadBattery(fs, "/ps")
+	if !ok || pct != 71 || power != PowerCharging {
+		t.Fatalf("got %d %q %v, want system battery 71%% charging", pct, power, ok)
+	}
+}
+
+func TestReadBatterySkipsAbsentBattery(t *testing.T) {
+	fs := mapFS{
+		files: map[string]string{
+			"/ps/BAT0/type":     "Battery\n",
+			"/ps/BAT0/present":  "0\n",
+			"/ps/BAT0/capacity": "22\n",
+			"/ps/BAT0/status":   "Discharging\n",
+		},
+		dirs: map[string][]string{"/ps": {"BAT0"}},
+	}
+	if _, _, ok := ReadBattery(fs, "/ps"); ok {
+		t.Fatal("absent battery must not be reported")
+	}
+}
+
 func TestReadBatteryNormalizesStatus(t *testing.T) {
 	for status, want := range map[string]string{
 		"Charging\n":     PowerCharging,

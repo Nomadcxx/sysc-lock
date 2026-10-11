@@ -13,9 +13,9 @@ type FS interface {
 	ReadDir(name string) ([]string, error)
 }
 
-// ReadBattery reads the first power-supply entry of type Battery under root.
-// Returns percent, the normalized power state ("" when unknown), and whether
-// a battery exists at all.
+// ReadBattery reads the first present system battery under root. Returns
+// percent, the normalized power state ("" when unknown), and whether a battery
+// exists at all.
 func ReadBattery(fs FS, root string) (int, string, bool) {
 	names, err := fs.ReadDir(root)
 	if err != nil {
@@ -25,6 +25,14 @@ func ReadBattery(fs FS, root string) (int, string, bool) {
 		dir := filepath.Join(root, name)
 		typ, err := fs.ReadFile(filepath.Join(dir, "type"))
 		if err != nil || strings.TrimSpace(string(typ)) != "Battery" {
+			continue
+		}
+		// ponytail: Keep scope-less legacy support; classify scope-less device
+		// supplies separately if one appears.
+		if scope, err := fs.ReadFile(filepath.Join(dir, "scope")); err == nil && strings.TrimSpace(string(scope)) == "Device" {
+			continue
+		}
+		if present, err := fs.ReadFile(filepath.Join(dir, "present")); err == nil && strings.TrimSpace(string(present)) == "0" {
 			continue
 		}
 		cap, err := fs.ReadFile(filepath.Join(dir, "capacity"))
