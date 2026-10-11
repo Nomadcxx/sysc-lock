@@ -13,9 +13,9 @@ type FS interface {
 	ReadDir(name string) ([]string, error)
 }
 
-// ReadBattery reads the first present system battery under root. Returns
-// percent, the normalized power state ("" when unknown), and whether a battery
-// exists at all.
+// ReadBattery reads the first battery under root not marked device-scoped or
+// absent. Returns percent, the normalized power state ("" when unknown), and
+// whether a battery exists at all.
 func ReadBattery(fs FS, root string) (int, string, bool) {
 	names, err := fs.ReadDir(root)
 	if err != nil {
@@ -27,8 +27,8 @@ func ReadBattery(fs FS, root string) (int, string, bool) {
 		if err != nil || strings.TrimSpace(string(typ)) != "Battery" {
 			continue
 		}
-		// ponytail: Keep scope-less legacy support; classify scope-less device
-		// supplies separately if one appears.
+		// ponytail: Missing scope preserves legacy support but cannot identify
+		// device batteries; add a classifier if a scope-less device is observed.
 		if scope, err := fs.ReadFile(filepath.Join(dir, "scope")); err == nil && strings.TrimSpace(string(scope)) == "Device" {
 			continue
 		}
