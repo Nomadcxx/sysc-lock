@@ -1,6 +1,9 @@
 package lockd
 
 import (
+	"errors"
+	"time"
+
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/screencopy"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-wayland/client"
@@ -11,6 +14,7 @@ const (
 	maxCaptureBytes       = 64 << 20
 	backdropDownsample    = 4
 	captureRoundtripLimit = 32
+	captureBudget         = 100 * time.Millisecond
 )
 
 // EnableBlur turns the frozen screencopy backdrop on or off. The radius
@@ -50,12 +54,16 @@ func (c *Client) CaptureBlur() {
 	if !c.blur || c.screencopy == nil || c.shm == nil || c.wallpaper != nil {
 		return
 	}
+	deadline := time.Now().Add(captureBudget)
 	for _, out := range c.outputs {
-		c.captureOutput(out)
+		if time.Until(deadline) <= 0 {
+			return
+		}
+		c.captureOutput(out, deadline)
 	}
 }
 
-func (c *Client) captureOutput(out *lockOut) {
+func (c *Client) captureOutput(out *lockOut, deadline time.Time) {
 	if out.removed || out.output == nil {
 		return
 	}
@@ -89,7 +97,7 @@ func (c *Client) captureOutput(out *lockOut) {
 	})
 	// v3 ends the offer list with buffer_done; the first offer is not
 	// necessarily one we can use.
-	if !c.pumpUntil(func() bool { return enumerated || finished }) || !offered {
+	if !c.pumpUntil(deadline, func() bool { return enumerated || finished }) || !offered {
 		return
 	}
 	buf := newCaptureBuffer(c.shm, int32(width), int32(height), format)
@@ -100,7 +108,7 @@ func (c *Client) captureOutput(out *lockOut) {
 	if frame.Copy(buf.buffer) != nil {
 		return
 	}
-	if !c.pumpUntil(func() bool { return finished }) || !copied {
+	if !c.pumpUntil(deadline, func() bool { return finished }) || !copied {
 		return
 	}
 	fullPix := make([]byte, int(width)*4*int(height))
@@ -115,18 +123,60 @@ func (c *Client) captureOutput(out *lockOut) {
 	out.backdrop, out.blurW, out.blurH = blur, int(width), int(height)
 }
 
-// pumpUntil spins roundtrips until ready or the connection dies. Safe
-// only before Run: the pump goroutine must never re-enter dispatch.
-func (c *Client) pumpUntil(ready func() bool) bool {
+// pumpUntil waits for compositor events before Lock without making a timeout
+// sticky on the Wayland stream. Safe only before Run: dispatch has one owner.
+func (c *Client) pumpUntil(deadline time.Time, ready func() bool) bool {
 	for i := 0; i < captureRoundtripLimit; i++ {
 		if ready() {
 			return true
 		}
-		if c.fatal != nil || c.display.Roundtrip() != nil {
+		if c.fatal != nil || !c.roundtripUntil(deadline) {
 			return false
 		}
 	}
 	return ready()
+}
+
+func (c *Client) roundtripUntil(deadline time.Time) bool {
+	callback, err := c.display.Sync()
+	if err != nil {
+		if callback != nil {
+			_ = callback.Destroy()
+		}
+		return false
+	}
+	defer callback.Destroy()
+	done := false
+	callback.SetDoneHandler(func(client.CallbackDoneEvent) { done = true })
+	for !done {
+		if c.fatal != nil || !c.waitReadable(deadline) || c.display.Context().Dispatch() != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Client) waitReadable(deadline time.Time) bool {
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		timeoutMS := int((remaining + time.Millisecond - 1) / time.Millisecond)
+		ready := false
+		err := c.display.Context().ControlFD(func(fd int) error {
+			pollfd := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+			if _, err := unix.Poll(pollfd, timeoutMS); err != nil {
+				return err
+			}
+			ready = pollfd[0].Revents&(unix.POLLIN|unix.POLLERR|unix.POLLHUP) != 0
+			return nil
+		})
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		return err == nil && ready
+	}
 }
 
 // captureBufferFits reports whether we can allocate a matching shm buffer.

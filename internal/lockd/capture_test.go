@@ -12,6 +12,7 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/screencopy"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-wayland/client"
+	"github.com/Nomadcxx/sysc-wayland/sessionlock"
 )
 
 // This check captures into memory before any lock request, never into a file.
@@ -69,11 +70,127 @@ func TestCaptureBeforeLockSurfaceConfigure(t *testing.T) {
 	manager := screencopy.NewZwlrScreencopyManagerV1(display.Context())
 	output := client.NewOutput(display.Context())
 	c := &Client{display: display, screencopy: manager}
-	c.captureOutput(&lockOut{output: output}) // w/h are unknown until Lock.
+	c.captureOutput(&lockOut{output: output}, time.Now().Add(captureBudget)) // w/h are unknown until Lock.
 	packet := <-request
 	if len(packet) != 20 || binary.NativeEndian.Uint32(packet[:4]) != manager.ID() {
 		t.Fatal("pre-lock capture did not request the compositor's geometry")
 	}
+}
+
+func TestHeldCaptureFallsBackAndStillRequestsLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wayland-test")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	lockRequest := make(chan []byte, 1)
+	display, err := client.Connect(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer display.Context().Close()
+	ctx := display.Context()
+	displayID := display.ID()
+	output := client.NewOutput(ctx)
+	c := &Client{
+		display: display, state: New(),
+		outputs:    map[OutputID]*lockOut{1: {output: output}},
+		screencopy: screencopy.NewZwlrScreencopyManagerV1(ctx),
+		shm:        client.NewShm(ctx),
+		compositor: client.NewCompositor(ctx),
+		mgr:        sessionlock.NewExtSessionLockManagerV1(ctx),
+	}
+	lockManagerID := c.mgr.ID()
+	go func() {
+		conn, err := listener.AcceptUnix()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var syncCallbackID uint32
+		for {
+			packet, err := readWaylandFrame(conn)
+			if err != nil {
+				return
+			}
+			senderID := binary.NativeEndian.Uint32(packet[:4])
+			opcode := binary.NativeEndian.Uint32(packet[4:8]) & 0xffff
+			if senderID == displayID && opcode == 0 {
+				syncCallbackID = binary.NativeEndian.Uint32(packet[8:12])
+			}
+			if senderID == lockManagerID && opcode == 1 {
+				if syncCallbackID == 0 {
+					lockRequest <- nil
+					return
+				}
+				// A timed-out sync may still reply after the lock request. Its
+				// zombie proxy must consume that event without poisoning dispatch.
+				var event [12]byte
+				binary.NativeEndian.PutUint32(event[:4], syncCallbackID)
+				binary.NativeEndian.PutUint32(event[4:8], 12<<16)
+				if _, err := conn.Write(event[:]); err != nil {
+					return
+				}
+				lockRequest <- packet
+				continue
+			}
+		}
+	}()
+	c.EnableBlur(true, 24)
+	out := c.outputs[1]
+	started := time.Now()
+	captureDone := make(chan struct{})
+	go func() {
+		c.CaptureBlur()
+		close(captureDone)
+	}()
+	select {
+	case <-captureDone:
+	case <-time.After(250 * time.Millisecond):
+		_ = display.Context().Close()
+		select {
+		case <-captureDone:
+		case <-time.After(time.Second):
+			t.Fatal("capture stayed blocked after closing the mock display")
+		}
+		t.Fatal("decorative capture did not yield when the compositor withheld its sync response")
+	}
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("decorative capture took %v with no compositor replies", elapsed)
+	}
+	if out.backdrop != nil {
+		t.Fatal("capture without a compositor response did not fall back to opaque")
+	}
+	if err := c.Lock(); err != nil {
+		t.Fatalf("lock request after capture timeout: %v", err)
+	}
+	select {
+	case packet := <-lockRequest:
+		if binary.NativeEndian.Uint32(packet[4:8])&0xffff != 1 {
+			t.Fatalf("lock opcode = %d, want 1", binary.NativeEndian.Uint32(packet[4:8])&0xffff)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("capture timeout left the protocol stream unable to send the lock request")
+	}
+	if err := ctx.Dispatch(); err != nil {
+		t.Fatalf("late sync reply after capture timeout: %v", err)
+	}
+}
+
+func readWaylandFrame(conn *net.UnixConn) ([]byte, error) {
+	header := make([]byte, 8)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return nil, err
+	}
+	size := binary.NativeEndian.Uint32(header[4:8]) >> 16
+	if size < 8 {
+		return nil, io.ErrUnexpectedEOF
+	}
+	packet := make([]byte, int(size))
+	copy(packet, header)
+	_, err := io.ReadFull(conn, packet[8:])
+	return packet, err
 }
 
 func TestCaptureBufferFits(t *testing.T) {
