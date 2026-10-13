@@ -245,6 +245,14 @@ func wakeScreensaver(v *lockd.View, k lockd.Key, now time.Time) bool {
 	return !k.Released && v.Activity(now)
 }
 
+// acceptsKeys reports whether a keystroke may reach the lock UI. Only the
+// locked phase gates input. A terminal authentication failure (lockout, policy
+// or expiry) must not freeze the keyboard: the message stays on screen through
+// View.errTerm, but dropping every key would leave SIGKILL as the only escape.
+func acceptsKeys(view *lockd.View, phase lockd.Phase) bool {
+	return phase == lockd.Locked
+}
+
 // showAuthFailure keeps presentation accounting separate from unlock authority.
 // false means a completed successful transaction; only the owner may unlock.
 func showAuthFailure(v *lockd.View, res auth.Result, err, abort error, now time.Time) bool {

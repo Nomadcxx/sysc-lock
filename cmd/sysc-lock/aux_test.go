@@ -574,6 +574,24 @@ func TestParityOnlyCredentialRejectionsIncreaseAttempts(t *testing.T) {
 	}
 }
 
+func TestAcceptsKeysIgnoresTerminalLockout(t *testing.T) {
+	now := time.Unix(600, 0)
+	v := lockd.NewView(theme.Default(), "u", "h")
+	// Drive the real lockout path that used to freeze the keyboard.
+	showAuthFailure(v, auth.Result{Rejected: true, Terminal: true, Message: "Too many attempts - locked out"}, nil, nil, now)
+	if !v.Terminal() {
+		t.Fatal("setup: lockout did not set terminal state")
+	}
+	if !acceptsKeys(v, lockd.Locked) {
+		t.Fatal("keys must keep flowing through a lockout; otherwise SIGKILL is the only escape")
+	}
+	for _, phase := range []lockd.Phase{lockd.Idle, lockd.Requesting, lockd.Unlocking, lockd.Done, lockd.Refused, lockd.Terminated} {
+		if acceptsKeys(v, phase) {
+			t.Fatalf("keys must be gated while phase = %d", phase)
+		}
+	}
+}
+
 func TestOptionsFrameSeparatesLabelsAndChoices(t *testing.T) {
 	o := options.New([]string{"none", "fire"}, []string{"eldritch", "nord"}, "none", "eldritch")
 	if optionsFrame(o) != nil {
