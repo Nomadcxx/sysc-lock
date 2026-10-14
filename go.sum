@@ -20,6 +20,8 @@ github.com/Nomadcxx/sysc-terminal v0.2.0 h1:0GZ6mV4gbB8px/hhqYm3da4DF6jYzZm9clZh
 github.com/Nomadcxx/sysc-terminal v0.2.0/go.mod h1:eJSkOSQvKGtpWNHSVbT2R/cwVbn8FtYi1Z5DfkYQndE=
 github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1 h1:b/fota81Abko+zPV8AhLKp4kvLtJhz9R/sCNntG6iZ8=
 github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1/go.mod h1:ZNAe41EM7R5G2KA55jqMPotAvrjVWcMq21BV69gROKA=
+github.com/Nomadcxx/sysc-wayland v0.3.2 h1:3QV9+Duzbe5nVbGRvyX8Gtxol0vMpPsXu2q6/Mwyrhc=
+github.com/Nomadcxx/sysc-wayland v0.3.2/go.mod h1:ZNAe41EM7R5G2KA55jqMPotAvrjVWcMq21BV69gROKA=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/charmbracelet/bubbles v0.21.0 h1:9TdC97SdRVg/1aaXNVWfFH3nnLAwOXr8Fn6u6mfQdFs=

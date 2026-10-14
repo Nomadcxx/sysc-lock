@@ -100,7 +100,7 @@ func (c *Client) Paste() string {
 	}
 	r, w := pipe[0], pipe[1]
 	defer unix.Close(r)
-	if err := c.clipOffer.Accept(c.lastKeySerial, mime); err != nil {
+	if err := c.clipOffer.Accept(c.lastKeySerial, &mime); err != nil {
 		unix.Close(w)
 		return ""
 	}

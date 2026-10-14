@@ -7,8 +7,8 @@ import (
 )
 
 func TestInitialReleaseContract(t *testing.T) {
-	if version != "0.1.0" {
-		t.Fatalf("version=%q, want 0.1.0", version)
+	if version != "0.1.1" {
+		t.Fatalf("version=%q, want 0.1.1", version)
 	}
 	data, err := os.ReadFile("../../.github/workflows/release.yml")
 	if err != nil {
