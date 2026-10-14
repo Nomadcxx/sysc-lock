@@ -7,7 +7,6 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/config"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
-	"github.com/Nomadcxx/sysc-terminal/renderer"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -36,7 +35,10 @@ func TestVisualEvidence(t *testing.T) {
 			t.Fatal(err, closeErr)
 		}
 	}
-	for _, effect := range renderer.Effects() {
+	for _, effect := range config.Effects() {
+		if effect == config.EffectNone {
+			continue
+		}
 		for _, tc := range []struct {
 			name    string
 			factory backendFactory

@@ -396,3 +396,31 @@ func TestRejectedHeaderEffectsLoadAsNoneAndCannotBeSaved(t *testing.T) {
 		})
 	}
 }
+
+func TestRemovedBackgroundEffectsLoadAsNoneAndCannotBeSaved(t *testing.T) {
+	for _, effect := range []string{"ak-47-rama", "beams"} {
+		t.Run(effect, func(t *testing.T) {
+			path := writeConfig(t, `{"effect":"`+effect+`","palette":"monochrome","effect_fps":60}`)
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := Load(path)
+			if err != nil || c.Effect != EffectNone || c.Palette != "monochrome" || c.EffectFPS != 60 {
+				t.Fatalf("legacy load=%+v, %v", c, err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("load rewrote user file")
+			}
+			c.Effect = effect
+			if err := Save(path, c); err == nil {
+				t.Fatal("saved excluded background")
+			}
+			after, err = os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("rejected save rewrote user file")
+			}
+		})
+	}
+}

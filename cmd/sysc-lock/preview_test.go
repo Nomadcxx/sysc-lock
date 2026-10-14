@@ -71,7 +71,7 @@ func TestDescriptionUsesLockerChoices(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(got.ClockStyles, ",") != strings.Join(art.Names(), ",") || strings.Join(got.Effects, ",") != strings.Join(effectChoices(), ",") || got.Defaults.Effect != config.EffectNone {
+	if strings.Join(got.ClockStyles, ",") != strings.Join(art.Names(), ",") || strings.Join(got.Effects, ",") != strings.Join(config.Effects(), ",") || got.Defaults.Effect != config.EffectNone {
 		t.Fatalf("description does not match locker choices: %+v", got)
 	}
 }
@@ -158,5 +158,30 @@ func TestVisualFollowUpCatalog(t *testing.T) {
 	}
 	if !slices.Contains(desc.Effects, "ak-47") {
 		t.Fatal("published ak-47 missing")
+	}
+}
+
+func TestOwnerBackgroundExclusions(t *testing.T) {
+	var out bytes.Buffer
+	if err := writeDescription(&out); err != nil {
+		t.Fatal(err)
+	}
+	var desc struct {
+		Effects []string `json:"effects"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &desc); err != nil {
+		t.Fatal(err)
+	}
+	for _, effect := range []string{"ak-47-rama", "beams"} {
+		if slices.Contains(desc.Effects, effect) {
+			t.Errorf("picker contains %s", effect)
+		}
+		req := strings.NewReader(`{"config":{"effect":"` + effect + `"}}`)
+		if err := runPreview(req, &bytes.Buffer{}); err == nil {
+			t.Errorf("preview accepted %s", effect)
+		}
+	}
+	if !slices.Contains(desc.Effects, "ak-47") {
+		t.Fatal("ordinary AK-47 missing")
 	}
 }

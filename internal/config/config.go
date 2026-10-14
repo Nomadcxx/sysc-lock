@@ -105,6 +105,17 @@ func Default() Config {
 	return Config{Effect: EffectNone, Header: "ascii_1", TextEffect: EffectNone, Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS, PowerActions: append([]power.Action{}, power.DefaultOrder...)}
 }
 
+// Effects is the background catalogue for config, options and native previews.
+func Effects() []string {
+	out := []string{EffectNone}
+	for _, id := range renderer.Effects() {
+		if id != "ak-47-rama" && id != "beams" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // TextEffects is the compact header catalogue. New upstream text scenes do not
 // become header choices until the plain-text animation path supports them.
 func TextEffects() []string {
@@ -134,6 +145,9 @@ func (c Config) Validate() error {
 	}
 	if c.Effect == EffectNone {
 		return nil
+	}
+	if !slices.Contains(Effects(), c.Effect) {
+		return fmt.Errorf("unknown background effect %q", c.Effect)
 	}
 	return renderer.Validate(c.Effect, c.Palette)
 }
@@ -198,6 +212,10 @@ func Load(path string) (Config, error) {
 	data, _ := json.Marshal(fields)
 	if err = json.Unmarshal(data, &c); err != nil {
 		return c, err
+	}
+	switch c.Effect {
+	case "ak-47-rama", "beams":
+		c.Effect = EffectNone
 	}
 	switch c.TextEffect {
 	case "fire-text", "ring-text", "decrypt":
