@@ -1,6 +1,7 @@
 package lockd
 
 import (
+	"github.com/Nomadcxx/sysc-lock/internal/i18n"
 	"image"
 	"image/color"
 	"math"
@@ -24,6 +25,7 @@ import (
 // auto-clear; terminal PAM errors persist.
 type View struct {
 	Pal                             theme.Palette
+	Locale                          string // UI language; "" draws English
 	User, Host                      string
 	Layout                          string // e.g. "us"; "" hides the indicator
 	Caps                            bool
@@ -74,6 +76,10 @@ type View struct {
 func NewView(pal theme.Palette, user, host string) *View {
 	return &View{Pal: pal, User: user, Host: host, TextScale: 1, StyleName: art.DefaultStyle}
 }
+
+// t translates the lock screen's own strings; app- and PAM-supplied text is
+// not in the catalog and passes through unchanged.
+func (v *View) t(s string) string { return i18n.T(v.Locale, s) }
 
 func (v *View) SetError(msg string, now time.Time) {
 	v.errMsg, v.errUntil, v.errTerm = msg, now.Add(4*time.Second), false
@@ -288,7 +294,7 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 		return
 	}
 	visible := v.EntryVisible(now)
-	status := v.StatusLine(now)
+	status := v.t(v.StatusLine(now))
 	dx := art.Jolt(now.Sub(v.joltStart)) * s.Cell
 	shift := func(r image.Rectangle) image.Rectangle { return r.Add(image.Pt(dx, 0)) }
 	v.drawForm(fb, shift(s.Frame), shift(s.Backing), shift(s.Rule), s.Scale)
@@ -317,10 +323,10 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	}
 	if !s.Attempts.Empty() {
 		attempts := shift(s.Attempts)
-		drawTextBoxLeft(fb, attempts, attempts.Min.Y+attempts.Dy()*3/4, "Failed attempts: "+itoa(v.Attempts), v.textPx(s.Attempts.Dy()*7/10, s.Attempts), v.muted())
+		drawTextBoxLeft(fb, attempts, attempts.Min.Y+attempts.Dy()*3/4, v.t("Failed attempts: ")+itoa(v.Attempts), v.textPx(s.Attempts.Dy()*7/10, s.Attempts), v.muted())
 	}
 	if !s.Warning.Empty() {
-		for i, text := range []string{"WARNING: Failures may", "lock your account"} {
+		for i, text := range []string{v.t("WARNING: Failures may"), v.t("lock your account")} {
 			warning := shift(s.Warning)
 			box := image.Rect(warning.Min.X, warning.Min.Y+i*warning.Dy()/2, warning.Max.X, warning.Min.Y+(i+1)*warning.Dy()/2)
 			drawTextBoxLeft(fb, box, box.Min.Y+box.Dy()*3/4, text, v.textPx(box.Dy()*3/5, box), safeInk(panelDanger, v.ground(), 4.5))
@@ -344,7 +350,7 @@ func (v *View) drawLabel(fb *render.Framebuffer, r image.Rectangle) {
 	}
 	text := strings.TrimSpace(v.Prompt)
 	if text == "" {
-		text = "Password:"
+		text = v.t("Password:")
 	}
 	drawTextBoxLeft(fb, r, r.Min.Y+r.Dy()*3/4, text, v.textPx(r.Dy()*7/10, r), v.accent())
 }
@@ -375,10 +381,10 @@ func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectang
 	}
 	parts := []string{}
 	if v.Caps {
-		parts = append(parts, "CAPS LOCK ON")
+		parts = append(parts, v.t("CAPS LOCK ON"))
 	}
 	if v.Num {
-		parts = append(parts, "Num Lock")
+		parts = append(parts, v.t("Num Lock"))
 	}
 	if v.Layout != "" {
 		parts = append(parts, strings.ToUpper(v.Layout))
@@ -398,6 +404,7 @@ func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
 	if text == "" {
 		return
 	}
+	text = v.t(text)
 	box := s.Help.Inset(max(1, int(s.Scale)))
 	drawTextBox(fb, box, box.Min.Y+box.Dy()*3/4, text, v.textPx(int(14*s.Scale), box), v.muted())
 }
@@ -454,7 +461,7 @@ func (v *View) drawPopup(fb *render.Framebuffer, box image.Rectangle, p MenuView
 	}
 	px := v.textPx(min(int(16*scale), lineH*3/5), inner)
 	y := inner.Min.Y
-	drawTextBox(fb, inner, y+lineH*3/5, p.Title, px, safeInk(accent, v.ground(), 4.5))
+	drawTextBox(fb, inner, y+lineH*3/5, v.t(p.Title), px, safeInk(accent, v.ground(), 4.5))
 	y += lineH
 	for _, row := range p.Rows {
 		if y+lineH > inner.Max.Y {
@@ -469,14 +476,14 @@ func (v *View) drawPopup(fb *render.Framebuffer, box image.Rectangle, p MenuView
 		r.Min.X += max(1, px/2)
 		r.Max.X -= max(1, px/2)
 		if row.Value == "" {
-			drawTextBox(fb, r, y+lineH*3/4, row.Title, px, ink)
+			drawTextBox(fb, r, y+lineH*3/4, v.t(row.Title), px, ink)
 		} else {
 			label, value := r, r
 			label.Max.X = r.Min.X + r.Dx()/2
 			value.Min.X = label.Max.X
 			text := "< " + row.Value + " >"
 			value.Min.X = max(value.Min.X, value.Max.X-textWidth(px, text)-px)
-			drawTextBoxLeft(fb, label, y+lineH*3/4, row.Title, px, ink)
+			drawTextBoxLeft(fb, label, y+lineH*3/4, v.t(row.Title), px, ink)
 			drawTextBoxLeft(fb, value, y+lineH*3/4, text, px, ink)
 		}
 		y += lineH
@@ -498,7 +505,7 @@ func (v *View) drawPopup(fb *render.Framebuffer, box image.Rectangle, p MenuView
 		y += lineH / 2
 	}
 	if p.Help != "" && y < inner.Max.Y {
-		drawTextBox(fb, image.Rect(inner.Min.X, y, inner.Max.X, inner.Max.Y), y+lineH/2, p.Help, v.textPx(int(13*scale), inner), v.muted())
+		drawTextBox(fb, image.Rect(inner.Min.X, y, inner.Max.X, inner.Max.Y), y+lineH/2, v.t(p.Help), v.textPx(int(13*scale), inner), v.muted())
 	}
 }
 

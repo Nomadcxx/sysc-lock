@@ -16,6 +16,7 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/art"
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
 	"github.com/Nomadcxx/sysc-lock/internal/config"
+	"github.com/Nomadcxx/sysc-lock/internal/i18n"
 	"github.com/Nomadcxx/sysc-lock/internal/inhibit"
 	"github.com/Nomadcxx/sysc-lock/internal/input"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
@@ -81,6 +82,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		pal = theme.Default()
 	}
 	view := lockd.NewView(pal, user, host)
+	view.Locale = i18n.Resolve()
 	view.TextScale = lockd.SystemTextScale()
 
 	model := &input.Model{}
