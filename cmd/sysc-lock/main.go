@@ -122,7 +122,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		view.Caps = k.CapsLock
 		view.Layout = k.Layout
 		view.Num = k.NumLock
-		if view.Terminal() || st.Phase() != lockd.Locked {
+		if !acceptsKeys(view, st.Phase()) {
 			client.Repaint()
 			return
 		}
