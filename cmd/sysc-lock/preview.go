@@ -115,7 +115,7 @@ func writeDescription(out io.Writer) error {
 		Headers     []string      `json:"headers"`
 		Palettes    []string      `json:"palettes"`
 		Defaults    config.Config `json:"defaults"`
-	}{ClockStyles: art.Names(), Effects: effectChoices(), TextEffects: append([]string{"none"}, renderer.TextEffects()...), Headers: configuredHeaderIDs(), Palettes: animations.GetThemeNames(), Defaults: config.Default()})
+	}{ClockStyles: art.Names(), Effects: config.Effects(), TextEffects: config.TextEffects(), Headers: configuredHeaderIDs(), Palettes: animations.GetThemeNames(), Defaults: config.Default()})
 }
 
 func configuredHeaderIDs() []string {

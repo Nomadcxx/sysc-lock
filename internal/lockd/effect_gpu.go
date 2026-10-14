@@ -99,27 +99,21 @@ const paletteStopsN = 8
 // guards the calls themselves.
 var glMu sync.Mutex
 
-// cpuEffectIDs are the non-text effects the renderer supports, and therefore the
-// only effects the GPU backend will attempt.
-var cpuEffectIDs = []string{"matrix", "fire", "fireworks", "rain", "beams", "aquarium"}
+// gpuEffectIDs are the effects whose shaders retain the intended presentation.
+// Terminal glyph scenes use the existing CPU fallback.
+var gpuEffectIDs = []string{"fire", "fireworks", "beams"}
 
 // paletteStops maps an effect id to its animations getter. Same mapping
 // sysc-terminal's effect registry uses, so GPU and CPU resolve identical
 // colors from one source of truth. Nil means the effect cannot run on GPU.
 func paletteStops(effect, palette string) []string {
 	switch effect {
-	case "rain":
-		return animations.GetRainPalette(palette)
-	case "matrix":
-		return animations.GetMatrixPalette(palette)
 	case "fire":
 		return animations.GetFirePalette(palette)
 	case "fireworks":
 		return animations.GetFireworksPalette(palette)
 	case "beams":
 		return animations.GetParticlePalette(palette)
-	case "aquarium":
-		return animations.GetScreensaverPalette(palette)
 	}
 	return nil
 }

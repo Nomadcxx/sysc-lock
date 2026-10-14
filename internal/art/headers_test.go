@@ -15,6 +15,9 @@ func TestHeaderConfPreservesLiteralArt(t *testing.T) {
 	}
 }
 func TestHeaderConfRejectsMalformedOrUnboundedArt(t *testing.T) {
+	if _, err := ParseHeaders("ascii_1=\"\"\"\nA" + strings.Repeat("\u0301", 121) + "\n\"\"\"\n"); err == nil {
+		t.Fatal("zero-width marks bypassed the header animation rune budget")
+	}
 	for _, s := range []string{"", "ascii_1=\"\"\"\nA", "ascii_1=\"\"\"\n\x1b[31mA\n\"\"\"", "ascii_1=\"\"\"\nA\n\"\"\"\nascii_1=\"\"\"\nB\n\"\"\"", strings.Repeat("x", MaxHeaderBytes+1), "ascii_1=\"\"\"\n" + strings.Repeat("X", 121) + "\n\"\"\""} {
 		if _, err := ParseHeaders(s); err == nil {
 			t.Fatalf("invalid config accepted: length %d", len(s))

@@ -1,6 +1,7 @@
 package lockd
 
 import (
+	"fmt"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"image"
 	"image/color"
@@ -90,7 +91,7 @@ func TestBackgroundPolicyPacesFrames(t *testing.T) {
 			c := &Client{}
 			c.SetEffectRate(tc.fps)
 			policy := resolveEffectPolicy("cpu", tc.powerSave, c.effectInterval(), func() bool { return tc.battery })
-			b := newBackgroundWorker("fire", "nord", nil, func() {}, policy, newCpuBackend)
+			b := newBackgroundWorker("rain", "nord", nil, func() {}, policy, newCpuBackend)
 			t.Cleanup(func() { b.stop(); <-b.done })
 			out := &lockOut{lastFrame: time.Unix(10, 0), background: b}
 			if got := out.effectDue(out.lastFrame.Add(tc.elapsed), c.effectInterval()); got != tc.due {
@@ -297,5 +298,41 @@ func TestSelectedEffectOverridesCapturedBackdrop(t *testing.T) {
 	}
 	if got := c.backgroundStatus(now); got != "animated" {
 		t.Fatal("selected effect reported", got)
+	}
+}
+
+func TestFirePacesAtHalfSpeedAfterPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		effect  string
+		fps     int
+		battery bool
+		want    time.Duration
+	}{
+		{"fire", 60, false, 29999998 * time.Nanosecond},
+		{"fire", 20, false, 90 * time.Millisecond},
+		{"fire", 60, true, 2 * (time.Second / 30)},
+		{"fire", 20, true, 90 * time.Millisecond},
+		{"rain", 60, false, 14999999 * time.Nanosecond},
+		{"rain", 60, true, time.Second / 30},
+	} {
+		for _, backend := range []string{"cpu", "gpu"} {
+			t.Run(fmt.Sprintf("%s/%s/%d/battery=%v", tc.effect, backend, tc.fps, tc.battery), func(t *testing.T) {
+				c := &Client{}
+				c.SetEffectRate(tc.fps)
+				policy := resolveEffectPolicy(backend, true, c.effectInterval(), func() bool { return tc.battery })
+				b := newBackgroundWorker(tc.effect, "nord", nil, func() {}, policy, newCpuBackend)
+				t.Cleanup(func() { b.stop(); <-b.done })
+				out := &lockOut{lastFrame: time.Unix(10, 0), background: b}
+				if b.interval != tc.want {
+					t.Fatalf("interval=%v want=%v", b.interval, tc.want)
+				}
+				if out.effectDue(out.lastFrame.Add(tc.want-1), c.effectInterval()) {
+					t.Fatal("tick before half-speed deadline")
+				}
+				if !out.effectDue(out.lastFrame.Add(tc.want), c.effectInterval()) {
+					t.Fatal("missed half-speed deadline")
+				}
+			})
+		}
 	}
 }

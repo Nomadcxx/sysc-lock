@@ -33,6 +33,11 @@ type backgroundWorker struct {
 }
 
 func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake func(), policy effectPolicy, newBackend backendFactory) *backgroundWorker {
+	// Fire advances one simulation step per frame on either backend.
+	// Apply its half-speed cadence after resolving the battery frame cap.
+	if effect == "fire" {
+		policy.Interval *= 2
+	}
 	b := &backgroundWorker{jobs: make(chan backgroundJob, 1), results: make(chan backgroundFrame, 1), stopped: make(chan struct{}), done: make(chan struct{}), interval: policy.Interval}
 	go func() {
 		defer func() { close(b.done); wake() }()

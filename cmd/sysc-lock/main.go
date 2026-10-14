@@ -23,7 +23,6 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
-	"github.com/Nomadcxx/sysc-terminal/renderer"
 )
 
 // The request command exits 0 after confirmed authenticated unlock; failures exit 1.
@@ -95,7 +94,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	sessionID := os.Getenv("XDG_SESSION_ID")
 	row := &ambientRow{path: ambient.Path()}
 	menu := power.New(nil, power.Availability{}, sessionID)
-	opts := options.New(effectChoices(), animations.GetThemeNames(), config.Default().Effect, config.Default().Palette)
+	opts := options.New(config.Effects(), animations.GetThemeNames(), config.Default().Effect, config.Default().Palette)
 	cfg := config.Default()
 	if err := art.SeedHeaders(config.HeadersPath()); err != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock: could not create headers.conf; shipped artwork remains available")
@@ -285,7 +284,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	}
 	cfg = cfg.WithShellTheme()
 	opts.Set(cfg.Effect, cfg.Palette)
-	opts.SetArtwork(headerIDs, append([]string{"none"}, renderer.TextEffects()...), cfg.Header, cfg.TextEffect)
+	opts.SetArtwork(headerIDs, config.TextEffects(), cfg.Header, cfg.TextEffect)
 	applyArtwork()
 	view.StyleName, view.Clock24, view.Reduced = cfg.ClockStyle, cfg.Clock24h, cfg.ReducedMotion
 	view.Pal = view.Pal.WithScheme(cfg.Palette)
@@ -443,20 +442,4 @@ func optionsFrame(o *options.Options) *lockd.MenuView {
 		p.Rows = append(p.Rows, row)
 	}
 	return p
-}
-
-// effectChoices is the menu's background list: none plus every scene effect;
-// text effects use the separately selected header.
-func effectChoices() []string {
-	text := map[string]bool{}
-	for _, n := range animations.GetTextBasedEffects() {
-		text[n] = true
-	}
-	out := []string{config.EffectNone}
-	for _, n := range animations.GetEffectNames() {
-		if !text[n] {
-			out = append(out, n)
-		}
-	}
-	return out
 }

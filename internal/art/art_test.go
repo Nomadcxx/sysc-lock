@@ -3,6 +3,7 @@ package art
 import (
 	"image"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -154,6 +155,61 @@ func TestJoltShiftsLeftThenRightThenRests(t *testing.T) {
 	} {
 		if got := Jolt(c.elapsed); got != c.want {
 			t.Fatalf("Jolt(%v)=%d want %d", c.elapsed, got, c.want)
+		}
+	}
+}
+
+func TestLegacyGlyphOrientation(t *testing.T) {
+	for _, tc := range []struct {
+		glyph rune
+		mask  string
+	}{
+		{'𜴅', "124"}, {'𜴉', "5"}, {'𜷡', "45678"}, {'𜶚', "13468"},
+	} {
+		rects := Rects([]string{string(tc.glyph)}, image.Point{}, 8, 16, -1)
+		for n := 1; n <= 8; n++ {
+			pt := image.Pt(((n-1)%2)*4+2, ((n-1)/2)*4+2)
+			lit := false
+			for _, r := range rects {
+				lit = lit || pt.In(r)
+			}
+			want := strings.ContainsRune(tc.mask, rune('0'+n))
+			if lit != want {
+				t.Errorf("%U octant %d lit=%v want=%v", tc.glyph, n, lit, want)
+			}
+		}
+	}
+}
+
+func TestDiagonalGlyphsFollowUnicodeCuts(t *testing.T) {
+	for _, size := range []image.Point{{8, 16}, {7, 13}, {19, 37}} {
+		for _, pair := range [][2]rune{{'🭅', '🭛'}, {'🭋', '🭡'}, {'🭊', '🭠'}} {
+			a := Rects([]string{string(pair[0])}, image.Point{}, size.X, size.Y, -1)
+			b := Rects([]string{string(pair[1])}, image.Point{}, size.X, size.Y, -1)
+			for y := 0; y < size.Y; y++ {
+				for x := 0; x < size.X; x++ {
+					n := 0
+					for _, r := range append(append([]image.Rectangle{}, a...), b...) {
+						if image.Pt(x, y).In(r) {
+							n++
+						}
+					}
+					if n != 1 {
+						t.Fatalf("%U/%U %v at %d,%d filled %d times", pair[0], pair[1], size, x, y, n)
+					}
+				}
+			}
+		}
+	}
+	// LOWER RIGHT, LOWER LEFT TO UPPER CENTRE: full bottom, half top.
+	rs := Rects([]string{"🭅"}, image.Point{}, 8, 16, -1)
+	for _, pt := range []image.Point{{4, 0}, {7, 0}, {0, 15}, {7, 15}} {
+		lit := false
+		for _, r := range rs {
+			lit = lit || pt.In(r)
+		}
+		if !lit {
+			t.Errorf("diagonal lost required pixel %v", pt)
 		}
 	}
 }
