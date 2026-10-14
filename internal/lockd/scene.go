@@ -203,13 +203,13 @@ func Layout(width, height int, scale float64, styleName, clockText string, attem
 	return s
 }
 
-// ScreensaverLayout retains the larger idle clock and wordmark without the form.
+// ScreensaverLayout retains a compact header above the larger idle clock.
 func ScreensaverLayout(width, height int, scale float64, style, text string) Scene {
 	s := Layout(width, height, scale, style, text)
 	corner, captionW := s.Corner, s.Caption.Dx()
 	gap := max(4, int(8*s.Scale))
 	bannerH := max(16, int(22*s.Scale))
-	logoW, logoH := logoSize(width, height, s.Scale)
+	logoW, logoH := min(int(520*s.Scale), width-2*gap), min(int(96*s.Scale), height/5)
 	chosen, rows, cw := art.Pick(style, text, width, height)
 	if !chosen.Plain() {
 		cw = max(art.MinCell, cw*3/4)

@@ -96,7 +96,7 @@ func gpuFrameSerial(t *testing.T, effect string, w, h int) []byte {
 }
 
 func TestGpuRedRoundTrip(t *testing.T) {
-	b := newTestGpuBackend(t, "rain", 2, 2)
+	b := newTestGpuBackend(t, "fire", 2, 2)
 	dst := make([]byte, 2*2*4)
 	if err := b.paintSolid([4]float32{1, 0, 0, 1}, dst, 2*4); err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestGpuRedRoundTrip(t *testing.T) {
 }
 
 func TestGpuOverlappingBackendsSurviveClose(t *testing.T) {
-	first := newTestGpuBackend(t, "rain", 2, 2)
+	first := newTestGpuBackend(t, "fire", 2, 2)
 	second := newTestGpuBackend(t, "fire", 4, 4)
 	draw := func(b *gpuBackend, col [4]float32, want []byte) {
 		t.Helper()
@@ -141,7 +141,7 @@ func TestGpuOverlappingBackendsSurviveClose(t *testing.T) {
 // row may be touched, and padding must keep whatever the caller left there.
 func TestGpuDrawHonorsStride(t *testing.T) {
 	const w, h, stride = 2, 3, 16
-	b := newTestGpuBackend(t, "rain", w, h)
+	b := newTestGpuBackend(t, "fire", w, h)
 	const sentinel = 0x77
 	dst := bytes.Repeat([]byte{sentinel}, h*stride)
 	if err := b.paintSolid([4]float32{1, 0, 0, 1}, dst, stride); err != nil {
@@ -221,9 +221,8 @@ func TestParseHexColors(t *testing.T) {
 }
 
 func TestPaletteStopsCoverEveryEffect(t *testing.T) {
-	// Every non-text effect the renderer accepts must resolve a palette, or the
-	// GPU backend would silently refuse work the CPU backend performs.
-	for _, effect := range cpuEffectIDs {
+	// Each retained GPU effect must resolve its authoritative palette.
+	for _, effect := range gpuEffectIDs {
 		if stops := paletteStops(effect, "nord"); len(stops) == 0 {
 			t.Errorf("effect %q resolved no stops for theme nord", effect)
 		}
@@ -237,7 +236,7 @@ func TestGpuBackendInit(t *testing.T) {
 	if _, err := os.Stat("/dev/dri"); err != nil {
 		t.Skip("no render node")
 	}
-	b, err := newGpuBackend("rain", "nord", 64, 64)
+	b, err := newGpuBackend("fire", "nord", 64, 64)
 	if err != nil {
 		t.Skip("no usable EGL device:", err) // headless or driver-less boxes
 	}
@@ -252,7 +251,7 @@ func TestGpuBackendInit(t *testing.T) {
 // records what actually renders so a live journal shows llvmpipe instead of
 // silently accepting software for gpu.
 func TestGpuPlatformReportsRenderer(t *testing.T) {
-	b := newTestGpuBackend(t, "rain", 8, 8)
+	b := newTestGpuBackend(t, "fire", 8, 8)
 	if b.platform == "" || b.renderer == "" {
 		t.Fatalf("platform=%q renderer=%q, want both non-empty", b.platform, b.renderer)
 	}
@@ -260,22 +259,6 @@ func TestGpuPlatformReportsRenderer(t *testing.T) {
 	if _, err := os.Stat("/dev/dri/renderD128"); err == nil && b.platform != "gbm" {
 		t.Errorf("renderD128 present but platform=%q, want gbm hardware path", b.platform)
 	}
-}
-
-func TestGpuRainFrame(t *testing.T) { gpuEffectFrame(t, "rain") }
-
-// GPU-vs-GPU determinism is the gate the CPU side can never offer: the
-// animations effects draw from the global math/rand, so two renderer
-// instances can't be byte-compared at all. Same seed, same step count, same
-// driver => identical bytes.
-//
-// ponytail: identical only on one driver; cross-vendor float hashing may
-// differ. If a Mesa mediump flake shows up, relax to coverage-only.
-func TestGpuRainDeterministic(t *testing.T) { gpuEffectDeterministic(t, "rain") }
-
-func TestGpuMatrixFrame(t *testing.T) {
-	gpuEffectFrame(t, "matrix")
-	gpuEffectDeterministic(t, "matrix")
 }
 
 func TestGpuFireFrame(t *testing.T) {
@@ -293,7 +276,12 @@ func TestGpuBeamsFrame(t *testing.T) {
 	gpuEffectDeterministic(t, "beams")
 }
 
-func TestGpuAquariumFrame(t *testing.T) {
-	gpuEffectFrame(t, "aquarium")
-	gpuEffectDeterministic(t, "aquarium")
+func TestGpuRefusesSimplifiedTerminalEffects(t *testing.T) {
+	for _, effect := range []string{"matrix", "rain", "aquarium"} {
+		b, err := newGpuBackend(effect, "nord", 64, 64)
+		if err == nil {
+			b.Close()
+			t.Errorf("%s still uses simplified shader", effect)
+		}
+	}
 }

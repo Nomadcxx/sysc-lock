@@ -23,7 +23,6 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/power"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"github.com/Nomadcxx/sysc-lock/internal/theme"
-	"github.com/Nomadcxx/sysc-terminal/renderer"
 )
 
 // The request command exits 0 after confirmed authenticated unlock; failures exit 1.
@@ -285,7 +284,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 	}
 	cfg = cfg.WithShellTheme()
 	opts.Set(cfg.Effect, cfg.Palette)
-	opts.SetArtwork(headerIDs, append([]string{"none"}, renderer.TextEffects()...), cfg.Header, cfg.TextEffect)
+	opts.SetArtwork(headerIDs, config.TextEffects(), cfg.Header, cfg.TextEffect)
 	applyArtwork()
 	view.StyleName, view.Clock24, view.Reduced = cfg.ClockStyle, cfg.Clock24h, cfg.ReducedMotion
 	view.Pal = view.Pal.WithScheme(cfg.Palette)

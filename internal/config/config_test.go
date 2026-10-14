@@ -372,3 +372,27 @@ func TestLoadReadsMediaSettings(t *testing.T) {
 		t.Fatalf("idle_media:false keeps the form caption only: media=%v idle=%v", c.ShowMedia(), c.ShowIdleMedia())
 	}
 }
+
+func TestRejectedHeaderEffectsLoadAsNoneAndCannotBeSaved(t *testing.T) {
+	for _, effect := range []string{"fire-text", "ring-text", "decrypt"} {
+		t.Run(effect, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			data := []byte(`{"effect":"matrix","palette":"nord","text_effect":"` + effect + `"}`)
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			c, err := Load(path)
+			if err != nil || c.TextEffect != "none" || c.Effect != "matrix" {
+				t.Fatalf("load=%+v,%v", c, err)
+			}
+			c.TextEffect = effect
+			if err := Save(path, c); err == nil {
+				t.Fatal("saved removed effect")
+			}
+			got, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(got, data) {
+				t.Fatal("rejection changed user config")
+			}
+		})
+	}
+}

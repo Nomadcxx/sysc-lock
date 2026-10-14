@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -135,5 +136,27 @@ func TestDescriptionListsCustomHeaderFile(t *testing.T) {
 	}
 	if len(got.Headers) != 1 || got.Headers[0] != "ascii_custom" {
 		t.Fatalf("description ignored user catalogue: %v", got.Headers)
+	}
+}
+
+func TestVisualFollowUpCatalog(t *testing.T) {
+	var out bytes.Buffer
+	if err := writeDescription(&out); err != nil {
+		t.Fatal(err)
+	}
+	var desc struct {
+		TextEffects []string `json:"text_effects"`
+		Effects     []string `json:"effects"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &desc); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"fire-text", "ring-text", "decrypt"} {
+		if slices.Contains(desc.TextEffects, id) {
+			t.Errorf("picker retained %s", id)
+		}
+	}
+	if !slices.Contains(desc.Effects, "ak-47") {
+		t.Fatal("published ak-47 missing")
 	}
 }

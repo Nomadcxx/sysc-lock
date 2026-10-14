@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/Nomadcxx/sysc-Go/animations"
@@ -104,13 +105,29 @@ func Default() Config {
 	return Config{Effect: EffectNone, Header: "ascii_1", TextEffect: EffectNone, Palette: "nord", ClockStyle: art.DefaultStyle, EffectFPS: DefaultFPS, PowerActions: append([]power.Action{}, power.DefaultOrder...)}
 }
 
-// Validate accepts EffectNone as a palette-only setting; every
-// other effect must be one the renderer knows.
+// TextEffects is the compact header catalogue. New upstream text scenes do not
+// become header choices until the plain-text animation path supports them.
+func TextEffects() []string {
+	out := []string{EffectNone}
+	for _, id := range renderer.TextEffects() {
+		switch id {
+		case "matrix-art", "rain-art", "beam-text", "blackhole", "pour", "print":
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// Validate accepts EffectNone as a palette-only setting; other effects must
+// belong to the appropriate background or compact header catalogue.
 func (c Config) Validate() error {
 	if animations.GetThemeMetadata(c.Palette) == nil {
 		return fmt.Errorf("unknown palette %q", c.Palette)
 	}
 	if c.TextEffect != "" && c.TextEffect != EffectNone {
+		if !slices.Contains(TextEffects(), c.TextEffect) {
+			return fmt.Errorf("unknown header text effect %q", c.TextEffect)
+		}
 		if err := renderer.ValidateText(c.TextEffect, c.Palette, "validation"); err != nil {
 			return err
 		}
@@ -181,6 +198,10 @@ func Load(path string) (Config, error) {
 	data, _ := json.Marshal(fields)
 	if err = json.Unmarshal(data, &c); err != nil {
 		return c, err
+	}
+	switch c.TextEffect {
+	case "fire-text", "ring-text", "decrypt":
+		c.TextEffect = EffectNone
 	}
 	c.ClockStyle = art.Lookup(c.ClockStyle).Name
 	switch {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/sysc-terminal/renderer"
+	"github.com/Nomadcxx/sysc-Go/animations"
 	xdraw "golang.org/x/image/draw"
 
 	"github.com/Nomadcxx/sysc-lock/internal/ambient"
@@ -40,9 +40,10 @@ type View struct {
 	Header, TextEffect, TextPalette string
 	headerBox                       image.Rectangle
 	headerConfig                    headerConfig
-	headerRenderer                  *renderer.Renderer
-	headerPixels                    []byte
+	headerRenderer                  animations.Animation
 	headerStep                      time.Time
+	headerTicks                     int
+	headerDone                      bool
 	Clock24                         bool
 	Reduced                         bool // no print reveal and no jolt
 	// Power is nil when no action is available. Hint is the strip text,
@@ -196,7 +197,7 @@ func (v *View) NextDeadline(now time.Time) time.Time {
 			consider(now.Add(40 * time.Millisecond))
 		}
 	}
-	if v.animateHeader() && v.headerRenderer != nil && !v.headerBox.Empty() {
+	if v.animateHeader() && v.headerRenderer != nil && !v.headerDone && !v.headerBox.Empty() {
 		consider(now.Add(50 * time.Millisecond))
 	}
 	if v.Power != nil && v.Power.Progress >= 0 {
@@ -525,7 +526,7 @@ func (v *View) drawForm(fb *render.Framebuffer, frame, backing, rule image.Recta
 		return
 	}
 	border(fb, frame, v.banner(), max(2, int(2*scale)))
-	if !rule.Empty() {
+	if !rule.Empty() && (v.Options == nil || !v.Options.Open) {
 		caption := "///////LOCKED///////"
 		px := v.textPx(rule.Dy()*3/5, rule)
 		width := min(rule.Dx(), textWidth(px, caption)+2*max(2, int(4*scale)))
