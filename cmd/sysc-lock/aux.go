@@ -267,6 +267,12 @@ func acceptsKeys(view *lockd.View, phase lockd.Phase) bool {
 	return phase == lockd.Locked
 }
 
+func clearTerminalErrorAfterInput(view *lockd.View, k lockd.Key) {
+	if view.Terminal() && !k.Released && (k.Text != "" || k.Backspace || k.Enter || k.Insert && k.Shift) {
+		view.ClearError()
+	}
+}
+
 // showAuthFailure keeps presentation accounting separate from unlock authority.
 // false means a completed successful transaction; only the owner may unlock.
 func showAuthFailure(v *lockd.View, res auth.Result, err, abort error, now time.Time) bool {

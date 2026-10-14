@@ -606,8 +606,22 @@ func TestTerminalPAMResultsKeepInputAvailable(t *testing.T) {
 			if model.Password() != "x" {
 				t.Fatalf("typed password = %q, want x", model.Password())
 			}
+			clearTerminalErrorAfterInput(v, lockd.Key{Text: "x"})
+			if v.Terminal() || v.StatusLine(now) == tc.result.Message {
+				t.Fatal("typing did not clear the terminal PAM message")
+			}
+
+			v.SetErrorTerminal(tc.result.Message, now)
+			clearTerminalErrorAfterInput(v, lockd.Key{Released: true, Text: "y"})
+			if !v.Terminal() {
+				t.Fatal("a released wake key cleared the terminal PAM message")
+			}
 			if submit, err := gate.press(model, reveal, lockd.Key{Enter: true}, now); !submit || err != nil {
 				t.Fatal("Enter after a terminal result must start a new PAM attempt", submit, err)
+			}
+			clearTerminalErrorAfterInput(v, lockd.Key{Enter: true})
+			if v.Terminal() {
+				t.Fatal("Enter did not clear the terminal PAM message")
 			}
 
 			for _, phase := range []lockd.Phase{lockd.Idle, lockd.Requesting, lockd.Unlocking, lockd.Done, lockd.Refused, lockd.Terminated} {

@@ -90,6 +90,10 @@ func (v *View) SetErrorTerminal(msg string, _ time.Time) {
 	v.errMsg, v.errTerm = msg, true
 }
 
+func (v *View) ClearError() {
+	v.errMsg, v.errUntil, v.errTerm = "", time.Time{}, false
+}
+
 func (v *View) NoteAttempt(now time.Time) { v.Attempts++ }
 
 // Reject records an ordinary failed attempt: the message, the count and, unless
