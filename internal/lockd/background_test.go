@@ -1,6 +1,7 @@
 package lockd
 
 import (
+	"bytes"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
 	"image"
 	"image/color"
@@ -33,6 +34,37 @@ func TestBackgroundStallKeepsForegroundResponsive(t *testing.T) {
 		t.Fatal("stall hides cached foreground source")
 	}
 }
+
+func TestPrepareBackgroundDimsCachedFramesAndKeepsBlurPixels(t *testing.T) {
+	cachedPixels := []byte{30, 60, 90, 255, 120, 150, 180, 255}
+	cached := &lockOut{w: 2, h: 1, background: &backgroundWorker{cached: backgroundFrame{pixels: cachedPixels, width: 2, height: 1}}}
+	cachedOutput := make([]byte, len(cachedPixels))
+	if !cached.prepareBackground(cachedOutput, cached.backgroundPixels()) {
+		t.Fatal("cached background not reported")
+	}
+	wantCached := append([]byte(nil), cachedPixels...)
+	DimBackground(wantCached)
+	if !bytes.Equal(cachedOutput, wantCached) {
+		t.Fatalf("cached background = %v, want copy and dim %v", cachedOutput, wantCached)
+	}
+
+	blur := render.New(2, 2)
+	for i := range blur.Pix {
+		blur.Pix[i] = byte(i*29 + 9)
+	}
+	DimBackground(blur.Pix) // captureOutput stores this reduced image already dimmed.
+	backdrop := &lockOut{w: 4, h: 4, blurW: 4, blurH: 4, backdrop: blur}
+	blurOutput := make([]byte, 4*4*4)
+	if !backdrop.prepareBackground(blurOutput, nil) {
+		t.Fatal("frozen blur not reported")
+	}
+	wantBlur := make([]byte, len(blurOutput))
+	backdrop.upscaleBackdrop(wantBlur)
+	if !bytes.Equal(blurOutput, wantBlur) {
+		t.Fatal("prepared frozen blur was dimmed again during paint")
+	}
+}
+
 func TestFrameCallbackPacesEffect(t *testing.T) {
 	now := time.Now()
 	out := &lockOut{lastFrame: now}

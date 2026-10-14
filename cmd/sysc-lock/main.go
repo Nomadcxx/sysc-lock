@@ -199,7 +199,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		}
 		client.SetMotionFrozen(gate.busy, time.Now())
 		client.Repaint()
-	}, func(fb *render.Framebuffer, scale float64, background []byte) error {
+	}, func(fb *render.Framebuffer, scale float64, background bool) error {
 		view.Scale = scale
 		now := time.Now()
 		view.Power = powerFrame(menu, now)
@@ -214,11 +214,9 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		}
 		cornerRunes, captionRunes := view.StatusRunes(lockd.Layout(fb.Width, fb.Height, scale, view.StyleName, "12:59:59 PM"))
 		view.Ambient, view.IdleCaption = applyMediaSettings(row.Get(now, cornerRunes, captionRunes), cfg)
-		if background == nil {
+		if !background {
 			view.Render(fb, now)
 		} else {
-			copy(fb.Pix, background)
-			lockd.DimBackground(fb.Pix)
 			view.RenderForeground(fb, now)
 		}
 		return nil

@@ -146,6 +146,19 @@ func (out *lockOut) backgroundPixels() []byte {
 	return nil
 }
 
+func (out *lockOut) prepareBackground(dst, cached []byte) bool {
+	if len(cached) != 0 {
+		copy(dst, cached)
+		DimBackground(dst)
+		return true
+	}
+	if out.backdrop != nil && out.blurW == out.w && out.blurH == out.h {
+		out.upscaleBackdrop(dst)
+		return true
+	}
+	return false
+}
+
 const (
 	defaultEffectEvery = 50 * time.Millisecond
 	minEffectFPS       = 10

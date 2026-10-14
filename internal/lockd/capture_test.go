@@ -1,6 +1,7 @@
 package lockd
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/screencopy"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
+	"github.com/Nomadcxx/sysc-lock/internal/theme"
 	"github.com/Nomadcxx/sysc-wayland/client"
 	"github.com/Nomadcxx/sysc-wayland/sessionlock"
 )
@@ -280,5 +282,55 @@ func BenchmarkUpscaleBackdrop1080p(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		out.upscaleBackdrop(dst)
+	}
+}
+
+func TestDimBeforeUpscalePreservesPixels(t *testing.T) {
+	for _, shape := range [][4]int{{2, 3, 7, 11}, {5, 7, 13, 9}, {3, 2, 13, 7}} {
+		src := render.New(shape[0], shape[1])
+		for i := range src.Pix {
+			src.Pix[i] = byte(i*31 + 17)
+		}
+		wantOut := &lockOut{w: shape[2], h: shape[3], backdrop: src}
+		want := make([]byte, shape[2]*shape[3]*4)
+		wantOut.upscaleBackdrop(want)
+		DimBackground(want)
+
+		dimmed := render.New(shape[0], shape[1])
+		copy(dimmed.Pix, src.Pix)
+		DimBackground(dimmed.Pix)
+		got := make([]byte, shape[2]*shape[3]*4)
+		(&lockOut{w: shape[2], h: shape[3], backdrop: dimmed}).upscaleBackdrop(got)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("dim before upscale changed pixels for %v", shape)
+		}
+	}
+}
+
+func BenchmarkFrozenBackdropRepaint(b *testing.B) {
+	// Captured blur is dimmed at reduced resolution before it is retained.
+	for _, output := range []struct {
+		name   string
+		width  int
+		height int
+	}{{"DP-1", 3440, 1440}, {"DP-3", 2560, 1440}} {
+		b.Run(output.name, func(b *testing.B) {
+			w, h := output.width, output.height
+			out := &lockOut{w: w, h: h, backdrop: render.New((w+3)/4, (h+3)/4)}
+			for i := 0; i < len(out.backdrop.Pix); i += 4 {
+				out.backdrop.Pix[i], out.backdrop.Pix[i+1], out.backdrop.Pix[i+2], out.backdrop.Pix[i+3] = 96, 72, 48, 255
+			}
+			DimBackground(out.backdrop.Pix)
+			fb := render.New(w, h)
+			view := NewView(theme.Default(), "user", "host")
+			view.Reduced = true
+			b.ReportAllocs()
+			b.SetBytes(int64(w * h * 4))
+			b.ResetTimer()
+			for b.Loop() {
+				out.upscaleBackdrop(fb.Pix)
+				view.RenderForeground(fb, time.Now())
+			}
+		})
 	}
 }

@@ -47,8 +47,9 @@ type Key struct {
 // KeyFunc receives every pressed key.
 type KeyFunc func(Key)
 
-// FrameFunc composes foreground into caller-owned opaque BGRA storage.
-type FrameFunc func(fb *render.Framebuffer, scale float64, background []byte) error
+// FrameFunc paints the foreground into caller-owned storage; a true background
+// flag means the framebuffer already contains the dimmed backdrop.
+type FrameFunc func(fb *render.Framebuffer, scale float64, background bool) error
 
 // Client owns the Wayland connection, the session lock, and one lock surface
 // per output. All protocol mutations run on the single pump goroutine; other
@@ -510,13 +511,9 @@ func (c *Client) paint(out *lockOut) {
 		c.failUI(err)
 		return
 	}
-	pixels := out.backgroundPixels()
-	if pixels == nil && out.backdrop != nil && out.blurW == out.w && out.blurH == out.h {
-		out.upscaleBackdrop(sb.data)
-		pixels = sb.data
-	}
+	background := out.prepareBackground(sb.data, out.backgroundPixels())
 	fb := &render.Framebuffer{Width: out.w, Height: out.h, Stride: out.w * 4, Pix: sb.data}
-	if err = c.frame(fb, scale, pixels); err != nil {
+	if err = c.frame(fb, scale, background); err != nil {
 		c.failUI(err)
 		return
 	}

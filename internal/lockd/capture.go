@@ -54,12 +54,10 @@ func (c *Client) CaptureBlur() {
 	if !c.blur || c.screencopy == nil || c.shm == nil || c.wallpaper != nil {
 		return
 	}
-	deadline := time.Now().Add(captureBudget)
 	for _, out := range c.outputs {
-		if time.Until(deadline) <= 0 {
-			return
-		}
-		c.captureOutput(out, deadline)
+		// ponytail: give each output its own bounded wait so one slow capture
+		// cannot starve later lock surfaces; total wait scales with output count.
+		c.captureOutput(out, time.Now().Add(captureBudget))
 	}
 }
 
@@ -120,6 +118,9 @@ func (c *Client) captureOutput(out *lockOut, deadline time.Time) {
 	if blur == nil {
 		return
 	}
+	// ponytail: dim the reduced blur once; nearest-neighbour upscaling repeats
+	// those exact pixels instead of dividing every full-resolution channel.
+	DimBackground(blur.Pix)
 	out.backdrop, out.blurW, out.blurH = blur, int(width), int(height)
 }
 
