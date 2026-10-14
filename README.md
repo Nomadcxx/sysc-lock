@@ -31,6 +31,10 @@ PAM authentication. It supports Niri and sysc-shell.
   Input is sealed per-output; the session is never exposed by the locker dying.
 - Authentication is PAM (`login` service) in-process. There is no bypass flag,
   no test-mode env var, and no IPC unlock path. Test fakes live only in `_test.go`.
+- Terminal PAM results (`PAM_MAXTRIES`, `PAM_PERM_DENIED` and
+  `PAM_ACCT_EXPIRED`) remain visible as persistent status messages, but do not
+  disable input. Each retry starts a fresh PAM transaction, so the configured
+  PAM stack applies its own lockout and account policy; F4 remains available.
 - The entry is bounded to 4096 UTF-8 bytes. Mutable storage is wiped on deletion,
   clear and completion. Go strings and PAM/runtime copies cannot be reliably
   erased. Passwords do not enter logs or IPC. PAM conversations are answered

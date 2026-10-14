@@ -574,21 +574,48 @@ func TestParityOnlyCredentialRejectionsIncreaseAttempts(t *testing.T) {
 	}
 }
 
-func TestAcceptsKeysIgnoresTerminalLockout(t *testing.T) {
+func TestTerminalPAMResultsKeepInputAvailable(t *testing.T) {
 	now := time.Unix(600, 0)
-	v := lockd.NewView(theme.Default(), "u", "h")
-	// Drive the real lockout path that used to freeze the keyboard.
-	showAuthFailure(v, auth.Result{Rejected: true, Terminal: true, Message: "Too many attempts - locked out"}, nil, nil, now)
-	if !v.Terminal() {
-		t.Fatal("setup: lockout did not set terminal state")
-	}
-	if !acceptsKeys(v, lockd.Locked) {
-		t.Fatal("keys must keep flowing through a lockout; otherwise SIGKILL is the only escape")
-	}
-	for _, phase := range []lockd.Phase{lockd.Idle, lockd.Requesting, lockd.Unlocking, lockd.Done, lockd.Refused, lockd.Terminated} {
-		if acceptsKeys(v, phase) {
-			t.Fatalf("keys must be gated while phase = %d", phase)
-		}
+	for _, tc := range []struct {
+		name   string
+		result auth.Result
+	}{
+		{name: "max tries", result: auth.Result{Rejected: true, Terminal: true, Message: "Too many attempts - locked out"}},
+		{name: "permission denied", result: auth.Result{Terminal: true, Message: "Permission denied"}},
+		{name: "account expired", result: auth.Result{Terminal: true, Message: "Account expired"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := lockd.NewView(theme.Default(), "u", "h")
+			if !showAuthFailure(v, tc.result, nil, nil, now) {
+				t.Fatal("terminal PAM result was treated as success")
+			}
+			if !v.Terminal() {
+				t.Fatal("terminal PAM result did not set terminal state")
+			}
+			if !acceptsKeys(v, lockd.Locked) {
+				t.Fatal("keys must keep flowing through a terminal result")
+			}
+
+			model := &input.Model{}
+			gate := &enterGate{}
+			reveal := &input.Reveal{}
+			reveal.Show(now)
+			if submit, err := gate.press(model, reveal, lockd.Key{Text: "x"}, now); submit || err != nil {
+				t.Fatal("typing after a terminal result must reach the entry", submit, err)
+			}
+			if model.Password() != "x" {
+				t.Fatalf("typed password = %q, want x", model.Password())
+			}
+			if submit, err := gate.press(model, reveal, lockd.Key{Enter: true}, now); !submit || err != nil {
+				t.Fatal("Enter after a terminal result must start a new PAM attempt", submit, err)
+			}
+
+			for _, phase := range []lockd.Phase{lockd.Idle, lockd.Requesting, lockd.Unlocking, lockd.Done, lockd.Refused, lockd.Terminated} {
+				if acceptsKeys(v, phase) {
+					t.Fatalf("keys must be gated while phase = %d", phase)
+				}
+			}
+		})
 	}
 }
 
