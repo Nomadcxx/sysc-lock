@@ -51,8 +51,8 @@ func ParseHeaders(data string) ([]Header, error) {
 				continue
 			}
 			line = strings.ReplaceAll(line, "\t", "    ")
-			if len(rows) >= 16 || runewidth.StringWidth(line) > 120 {
-				return nil, fmt.Errorf("header dimensions exceed 120 columns or 16 rows at line %d", lineNo+1)
+			if len(rows) >= 16 || runewidth.StringWidth(line) > 120 || utf8.RuneCountInString(line) > 120 {
+				return nil, fmt.Errorf("header dimensions exceed 120 columns/runes or 16 rows at line %d", lineNo+1)
 			}
 			for _, r := range line {
 				if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
