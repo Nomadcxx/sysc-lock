@@ -63,16 +63,17 @@ func TestRejectionFeedbackDoesNotMoveTheField(t *testing.T) {
 func TestEmptyFieldHasNoDuplicatePasswordPlaceholder(t *testing.T) {
 	now := time.Unix(600, 0)
 	v := NewView(theme.Default(), "u", "h")
-	v.Reduced = true
+	v.Reduced, v.Scale = true, 1
 	v.Entry = &input.Model{}
 	v.Reveal.Show(now)
 	s := Layout(960, 720, 1, v.StyleName, v.clockText(now))
 	fb := render.New(960, 720)
 	v.Render(fb, now)
 	box := image.Rect(s.Entry.Min.X+s.Entry.Dx()/4, s.Entry.Min.Y+4, s.Entry.Max.X-s.Entry.Dx()/4, s.Entry.Max.Y-4)
+	ground := glassOver(v.Pal.Surface, v.ground())
 	for y := box.Min.Y; y < box.Max.Y; y++ {
 		for x := box.Min.X; x < box.Max.X; x++ {
-			if got := color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA); got != v.ground() {
+			if got := color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA); got != ground {
 				t.Fatal("empty field has text competing with its label")
 			}
 		}
@@ -139,7 +140,7 @@ func TestCaretUsesFrameTimeAndHonorsReducedMotion(t *testing.T) {
 			now := time.UnixMilli(10_000 + millis)
 			v.Reveal.Show(now)
 			v.Render(fb, now)
-			want := v.ground()
+			want := glassOver(v.Pal.Surface, v.ground())
 			if reduced || millis < 500 {
 				want = v.accent()
 			}
@@ -558,9 +559,6 @@ func TestHintStripAppearsWithTheEntryAndTheTextMatchesAvailability(t *testing.T)
 	fb := render.New(960, 720)
 	fb.Fill(v.Pal.Surface)
 	v.RenderForeground(fb, now)
-	if color.NRGBAModel.Convert(fb.At(s.Help.Min.X+1, s.Help.Min.Y+1)).(color.NRGBA) != panelGround {
-		t.Fatal("the hint strip needs a solid backing over the effect")
-	}
 	v.Hint = "F4 Power • Enter Unlock"
 	fb = render.New(960, 720)
 	fb.Fill(v.Pal.Surface)
@@ -574,6 +572,25 @@ func TestHintStripAppearsWithTheEntryAndTheTextMatchesAvailability(t *testing.T)
 	hidden.RenderForeground(fb2, now)
 	if reflect.DeepEqual(fb.Pix, fb2.Pix) {
 		t.Fatal("F4 must be mentioned when an action is available")
+	}
+}
+
+func TestHintStripLeavesBackdropUnpainted(t *testing.T) {
+	v := NewView(theme.Default(), "u", "h")
+	v.Hint = "Enter Unlock"
+	s := Layout(960, 720, 1, v.StyleName, "12:59:59 PM")
+	if s.Help.Empty() {
+		t.Skip("this output has no room for a hint strip")
+	}
+	backdrop := color.NRGBA{R: 20, G: 60, B: 190, A: 255}
+	fb := render.New(960, 720)
+	fb.Fill(backdrop)
+	v.drawHint(fb, s)
+	if got := color.NRGBAModel.Convert(fb.At(s.Help.Min.X+1, s.Help.Min.Y+1)).(color.NRGBA); got != backdrop {
+		t.Fatalf("hint strip backing = %#v, want untouched backdrop %#v", got, backdrop)
+	}
+	if n, _ := inkIn(fb, s.Help, backdrop); n == 0 {
+		t.Fatal("transparent hint strip lost its text")
 	}
 }
 
@@ -897,28 +914,93 @@ func TestLockedCaptionIsInsetIntoTopBorder(t *testing.T) {
 	fb := render.New(1536, 864)
 	fb.Fill(v.Pal.Surface)
 	v.drawForm(fb, s.Frame, s.Backing, s.Rule, s.Scale)
-	// The continuous line must be interrupted for caption ink at its centre.
-	mid := s.Frame.Min.X + s.Frame.Dx()/2
-	ground := 0
-	for x := mid - 80; x < mid+80; x++ {
-		if fb.At(x, s.Frame.Min.Y) == v.ground() {
-			ground++
+	caption := "///////LOCKED///////"
+	px := v.textPx(s.Rule.Dy()*3/5, s.Rule)
+	width := min(s.Rule.Dx(), textWidth(px, caption)+2*max(2, int(4*s.Scale)))
+	box := image.Rect(s.Rule.Min.X+(s.Rule.Dx()-width)/2, s.Rule.Min.Y, s.Rule.Min.X+(s.Rule.Dx()+width)/2, s.Rule.Max.Y)
+	glassGround := glassOver(v.Pal.Surface, v.ground())
+	glassBorder := glassOver(glassGround, v.banner())
+	if got := color.NRGBAModel.Convert(fb.At(box.Min.X+1, s.Frame.Min.Y)).(color.NRGBA); got != v.Pal.Surface {
+		t.Fatalf("LOCKED label backing is %v, want untouched backdrop %v", got, v.Pal.Surface)
+	}
+	if got := color.NRGBAModel.Convert(fb.At(box.Min.X-1, s.Frame.Min.Y)).(color.NRGBA); got != glassBorder {
+		t.Fatalf("outer outline beside caption is %v, want translucent outline %v", got, glassBorder)
+	}
+	coverage := maxTextCoverage(fb, box, s.Frame.Min.Y, v.Pal.Surface, v.banner())
+	if coverage < .8 {
+		t.Fatalf("caption ink above the frame has only %.2f coverage", coverage)
+	}
+}
+
+func glassOver(bg, fg color.NRGBA) color.NRGBA {
+	a, inverse := glassAlpha, uint32(255)-glassAlpha
+	mix := func(back, front uint8) uint8 {
+		return uint8((uint32(front)*a + uint32(back)*inverse + 127) / 255)
+	}
+	return color.NRGBA{R: mix(bg.R, fg.R), G: mix(bg.G, fg.G), B: mix(bg.B, fg.B), A: 255}
+}
+
+func maxTextCoverage(fb *render.Framebuffer, box image.Rectangle, yMax int, bg, ink color.NRGBA) float64 {
+	box.Max.Y = min(box.Max.Y, yMax)
+	if box.Empty() || ink.R == bg.R {
+		return 0
+	}
+	maxCoverage := 0.0
+	for y := box.Min.Y; y < box.Max.Y; y++ {
+		for x := box.Min.X; x < box.Max.X; x++ {
+			got := color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA)
+			coverage := float64(got.R-bg.R) / float64(ink.R-bg.R)
+			maxCoverage = max(maxCoverage, min(1, coverage))
 		}
 	}
-	if ground < 20 {
-		t.Fatal("caption has no inset in top border")
+	return maxCoverage
+}
+
+func TestFormSurfacesUseGlass(t *testing.T) {
+	now := time.Unix(1_760_000_000, 0)
+	backdrop := color.NRGBA{R: 20, G: 60, B: 190, A: 255}
+	v := NewView(theme.Default(), "u", "h")
+	v.Reduced, v.Entry = true, &input.Model{}
+	v.Reveal.Show(now)
+	fb := render.New(960, 720)
+	fb.Fill(backdrop)
+	v.RenderForeground(fb, now)
+	s := Layout(fb.Width, fb.Height, 1, v.StyleName, v.clockText(now))
+
+	colorAt := func(x, y int) color.NRGBA {
+		return color.NRGBAModel.Convert(fb.At(x, y)).(color.NRGBA)
 	}
-	inkAbove := false
-	for y := s.Rule.Min.Y; y < s.Frame.Min.Y; y++ {
-		for x := mid - 120; x < mid+120; x++ {
-			if c := fb.At(x, y); c != v.ground() && c != v.Pal.Surface {
-				inkAbove = true
-			}
+	assertPixel := func(name string, x, y int, want color.NRGBA) {
+		t.Helper()
+		if got := colorAt(x, y); got != want {
+			t.Errorf("%s at (%d,%d) = %#v, want %#v", name, x, y, got, want)
 		}
 	}
-	if !inkAbove {
-		t.Fatal("caption ink stays inside the frame instead of sitting in its border")
+
+	assertPixel("form ground", s.Frame.Min.X+8, s.Frame.Min.Y+8, glassOver(backdrop, v.ground()))
+	frameGround := glassOver(backdrop, v.ground())
+	if got := colorAt(s.Entry.Min.X+s.Entry.Dx()/2, s.Entry.Min.Y+s.Entry.Dy()/2); int(got.B)-int(got.R) < 60 {
+		t.Errorf("entry glass preserves too little of the blue backdrop: %#v", got)
 	}
+	assertPixel("outer outline", s.Frame.Min.X, s.Frame.Min.Y+8, glassOver(frameGround, v.banner()))
+	assertPixel("entry ground", s.Entry.Min.X+s.Entry.Dx()/2, s.Entry.Min.Y+s.Entry.Dy()/2, frameGround)
+	assertPixel("entry outline", s.Entry.Min.X, s.Entry.Min.Y+8, glassOver(frameGround, v.accent()))
+	assertPixel("outside form", 0, 0, backdrop)
+
+	caption := "///////LOCKED///////"
+	px := v.textPx(s.Rule.Dy()*3/5, s.Rule)
+	width := min(s.Rule.Dx(), textWidth(px, caption)+2*max(2, int(4*s.Scale)))
+	box := image.Rect(s.Rule.Min.X+(s.Rule.Dx()-width)/2, s.Rule.Min.Y, s.Rule.Min.X+(s.Rule.Dx()+width)/2, s.Rule.Max.Y)
+	assertPixel("LOCKED backing above the frame", box.Min.X+1, box.Min.Y+1, backdrop)
+	assertPixel("LOCKED backing through the frame", box.Min.X+1, s.Frame.Min.Y, backdrop)
+	coverage := maxTextCoverage(fb, box, s.Frame.Min.Y, backdrop, v.banner())
+	if coverage < .8 {
+		t.Errorf("LOCKED caption has only %.2f foreground coverage over glass", coverage)
+	}
+	sq := max(2, s.Entry.Dy()/4)
+	caretX := s.Entry.Min.X + max(2, int(8*s.Scale)) + sq/2
+	caretY := s.Entry.Min.Y + s.Entry.Dy()/2
+	assertPixel("opaque caret", caretX, caretY, v.accent())
 }
 
 func stackOf(s Scene) image.Rectangle {

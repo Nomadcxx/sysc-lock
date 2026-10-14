@@ -20,7 +20,7 @@ import (
 )
 
 // View composes the lock screen over the background: SYSC header, a greet-style
-// framed form with the LOCKED rule and solid panel ground, the block-digit clock,
+// framed form with the LOCKED rule and glass panel ground, the block-digit clock,
 // date, and an entry that appears when a key reveals it. Errors keep the 4s
 // auto-clear; terminal PAM errors persist.
 type View struct {
@@ -240,6 +240,68 @@ func border(fb *render.Framebuffer, r image.Rectangle, c color.NRGBA, n int) {
 	fillRect(fb, image.Rect(r.Max.X-n, r.Min.Y, r.Max.X, r.Max.Y), c)
 }
 
+const glassAlpha = uint32(0x80)
+
+// fillGlassRect source-over blends a fixed-opacity color into the opaque BGRA
+// framebuffer, letting the already blurred backdrop show through.
+func fillGlassRect(fb *render.Framebuffer, r image.Rectangle, c color.NRGBA) {
+	r = r.Intersect(fb.Bounds())
+	if r.Empty() {
+		return
+	}
+	inverse := uint32(255) - glassAlpha
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			i := y*fb.Stride + x*4
+			fb.Pix[i] = uint8((uint32(c.B)*glassAlpha + uint32(fb.Pix[i])*inverse + 127) / 255)
+			fb.Pix[i+1] = uint8((uint32(c.G)*glassAlpha + uint32(fb.Pix[i+1])*inverse + 127) / 255)
+			fb.Pix[i+2] = uint8((uint32(c.R)*glassAlpha + uint32(fb.Pix[i+2])*inverse + 127) / 255)
+			fb.Pix[i+3] = 0xFF
+		}
+	}
+}
+
+// fillGlassRectExcept leaves a rectangular cutout untouched so the existing
+// backdrop shows through instead of being blended a second time.
+func fillGlassRectExcept(fb *render.Framebuffer, r, cutout image.Rectangle, c color.NRGBA) {
+	r = r.Intersect(fb.Bounds())
+	if r.Empty() {
+		return
+	}
+	hole := r.Intersect(cutout)
+	if hole.Empty() {
+		fillGlassRect(fb, r, c)
+		return
+	}
+	fillGlassRect(fb, image.Rect(r.Min.X, r.Min.Y, r.Max.X, hole.Min.Y), c)
+	fillGlassRect(fb, image.Rect(r.Min.X, hole.Max.Y, r.Max.X, r.Max.Y), c)
+	fillGlassRect(fb, image.Rect(r.Min.X, hole.Min.Y, hole.Min.X, hole.Max.Y), c)
+	fillGlassRect(fb, image.Rect(hole.Max.X, hole.Min.Y, r.Max.X, hole.Max.Y), c)
+}
+
+// glassBorder draws non-overlapping strips so translucent corners are blended once.
+func glassBorder(fb *render.Framebuffer, r image.Rectangle, c color.NRGBA, n int) {
+	glassBorderWithTopGap(fb, r, c, n, image.Rectangle{})
+}
+
+func glassBorderWithTopGap(fb *render.Framebuffer, r image.Rectangle, c color.NRGBA, n int, gap image.Rectangle) {
+	r = r.Intersect(fb.Bounds())
+	if r.Empty() || n < 1 {
+		return
+	}
+	topMax := min(r.Max.Y, r.Min.Y+n)
+	bottomMin := max(topMax, r.Max.Y-n)
+	fillGlassRectExcept(fb, image.Rect(r.Min.X, r.Min.Y, r.Max.X, topMax), gap, c)
+	fillGlassRect(fb, image.Rect(r.Min.X, bottomMin, r.Max.X, r.Max.Y), c)
+	if topMax >= bottomMin {
+		return
+	}
+	leftMax := min(r.Max.X, r.Min.X+n)
+	rightMin := max(leftMax, r.Max.X-n)
+	fillGlassRect(fb, image.Rect(r.Min.X, topMax, leftMax, bottomMin), c)
+	fillGlassRect(fb, image.Rect(rightMin, topMax, r.Max.X, bottomMin), c)
+}
+
 // printLimits reports how many clock cells the print reveal has drawn at now
 // (-1: all). done is true once the reveal has finished or motion is reduced;
 // the date appears then. The header and rule show immediately.
@@ -315,7 +377,7 @@ func (v *View) RenderForeground(fb *render.Framebuffer, now time.Time) {
 	if visible {
 		fieldInk = v.accent()
 	}
-	border(fb, shift(s.Entry), fieldInk, max(1, int(s.Scale)))
+	glassBorder(fb, shift(s.Entry), fieldInk, max(1, int(s.Scale)))
 	if visible {
 		v.drawLabel(fb, shift(s.Label))
 		v.drawEntry(fb, shift(s.Entry), shift(s.Indicators), s.Scale, now)
@@ -362,8 +424,8 @@ func (v *View) drawLabel(fb *render.Framebuffer, r image.Rectangle) {
 	drawTextBoxLeft(fb, r, r.Min.Y+r.Dy()*3/4, text, v.textPx(r.Dy()*7/10, r), v.accent())
 }
 
-// drawEntry draws the entry field inside the framed form, which owns the
-// border and opaque backing; content starts at the left inset.
+// drawEntry draws within the form's translucent ground; content starts at the
+// left inset so the glass remains visible around text and password marks.
 func (v *View) drawEntry(fb *render.Framebuffer, entry, indicators image.Rectangle, scale float64, now time.Time) {
 	inner := entry.Inset(max(2, int(8*scale)))
 	sq := max(2, entry.Dy()/4)
@@ -403,7 +465,6 @@ func (v *View) drawHint(fb *render.Framebuffer, s Scene) {
 	if s.Help.Empty() {
 		return
 	}
-	fillRect(fb, s.Help, v.ground())
 	text := v.Hint
 	if v.Options != nil && v.Options.Open {
 		text = "Esc / F1 Return to password"
@@ -516,24 +577,26 @@ func (v *View) drawPopup(fb *render.Framebuffer, box image.Rectangle, p MenuView
 	}
 }
 
-// drawForm renders the greet-style framed form: theme-primary border, the
-// LOCKED caption inset into the top border, over a solid ground panel.
+// drawForm renders the greet-style framed form over a translucent ground panel.
 func (v *View) drawForm(fb *render.Framebuffer, frame, backing, rule image.Rectangle, scale float64) {
+	caption, box := "", image.Rectangle{}
+	if !rule.Empty() {
+		caption = "///////LOCKED///////"
+		px := v.textPx(rule.Dy()*3/5, rule)
+		width := min(rule.Dx(), textWidth(px, caption)+2*max(2, int(4*scale)))
+		box = image.Rect(rule.Min.X+(rule.Dx()-width)/2, rule.Min.Y, rule.Min.X+(rule.Dx()+width)/2, rule.Max.Y)
+	}
 	if !frame.Empty() {
-		fillRect(fb, frame, v.ground())
+		fillGlassRectExcept(fb, frame, box, v.ground())
 	} else if !backing.Empty() {
-		fillRect(fb, backing, v.ground())
+		fillGlassRect(fb, backing, v.ground())
 	}
 	if frame.Empty() {
 		return
 	}
-	border(fb, frame, v.banner(), max(2, int(2*scale)))
-	if !rule.Empty() {
-		caption := "///////LOCKED///////"
+	glassBorderWithTopGap(fb, frame, v.banner(), max(2, int(2*scale)), box)
+	if !box.Empty() {
 		px := v.textPx(rule.Dy()*3/5, rule)
-		width := min(rule.Dx(), textWidth(px, caption)+2*max(2, int(4*scale)))
-		box := image.Rect(rule.Min.X+(rule.Dx()-width)/2, rule.Min.Y, rule.Min.X+(rule.Dx()+width)/2, rule.Max.Y)
-		fillRect(fb, box, v.ground())
 		metrics := face(px).Metrics()
 		baseline := box.Min.Y + (box.Dy()+metrics.Ascent.Ceil()-metrics.Descent.Ceil())/2
 		drawTextBox(fb, box, baseline, caption, px, v.banner())
