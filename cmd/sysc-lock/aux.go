@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/Nomadcxx/sysc-lock/internal/auth"
+	"github.com/Nomadcxx/sysc-lock/internal/i18n"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
 	"github.com/Nomadcxx/sysc-lock/internal/options"
 	"github.com/Nomadcxx/sysc-lock/internal/power"
@@ -32,6 +33,19 @@ func currentUser() (string, error) {
 		return "", fmt.Errorf("cannot resolve real UID %d", os.Getuid())
 	}
 	return u.Username, nil
+}
+
+// locale is the lock screen's UI language, downgraded to English when the
+// active font has no glyphs for the catalog. Fira Code and the embedded Go
+// Mono cover Latin and Cyrillic but no CJK, so a ja/ko session would draw
+// every prompt as missing-glyph boxes.
+func locale() string {
+	l := i18n.Resolve()
+	if i18n.Renderable(l, lockd.Covered) {
+		return l
+	}
+	fmt.Fprintln(os.Stderr, "sysc-lock: font lacks glyphs for", l+"; using English")
+	return "en"
 }
 
 func palettePath() string {

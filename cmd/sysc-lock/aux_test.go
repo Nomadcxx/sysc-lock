@@ -648,3 +648,23 @@ func TestApplyMediaSettings(t *testing.T) {
 		t.Fatalf("media:false drops only the caption: %+v idle=%v", got, idle)
 	}
 }
+
+// TestLocaleFallsBackWhenFontCannotDrawCJK pins the guard: a ja/ko session on a
+// font with no CJK must resolve to English rather than draw missing-glyph
+// boxes, while the Latin/Cyrillic catalogs stay selected.
+func TestLocaleFallsBackWhenFontCannotDrawCJK(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_MESSAGES", "")
+	for _, tc := range []struct{ lang, want string }{
+		{"ja_JP.UTF-8", "en"},
+		{"ko_KR.UTF-8", "en"},
+		{"ru_RU.UTF-8", "ru"},
+		{"es_ES.UTF-8", "es"},
+	} {
+		t.Setenv("LANG", tc.lang)
+		if got := locale(); got != tc.want {
+			t.Errorf("locale() with LANG=%s = %q, want %q", tc.lang, got, tc.want)
+		}
+	}
+}
