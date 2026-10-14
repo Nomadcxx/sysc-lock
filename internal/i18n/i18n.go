@@ -46,9 +46,14 @@ func Resolve() string {
 		return l
 	}
 	for _, key := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
-		if l := Match(os.Getenv(key)); l != "" {
+		tag := strings.TrimSpace(os.Getenv(key))
+		if tag == "" {
+			continue
+		}
+		if l := Match(tag); l != "" {
 			return l
 		}
+		return "en"
 	}
 	return "en"
 }

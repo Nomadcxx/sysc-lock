@@ -52,9 +52,24 @@ func TestResolvePrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("LC_ALL", "")
-	t.Setenv("LANG", "C")
-	if got := Resolve(); got != "en" {
-		t.Fatalf("C locale: got %q", got)
+	for _, tc := range []struct {
+		name, all, messages, lang string
+	}{
+		{"LC_ALL C", "C", "ja", "ru"},
+		{"LC_ALL POSIX", "POSIX", "ja", "ru"},
+		{"LC_ALL unsupported", "de_DE.UTF-8", "ja", "ru"},
+		{"LC_MESSAGES C", "", "C", "ru"},
+		{"LC_MESSAGES POSIX", "", "POSIX", "ru"},
+		{"LC_MESSAGES unsupported", "", "de_DE.UTF-8", "ru"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LC_ALL", tc.all)
+			t.Setenv("LC_MESSAGES", tc.messages)
+			t.Setenv("LANG", tc.lang)
+			if got := Resolve(); got != "en" {
+				t.Fatalf("Resolve() = %q, want English for %s", got, tc.name)
+			}
+		})
 	}
 }
 
