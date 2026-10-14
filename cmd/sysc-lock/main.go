@@ -82,7 +82,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		pal = theme.Default()
 	}
 	view := lockd.NewView(pal, user, host)
-	view.Locale = i18n.Resolve()
+	view.Locale = resolveLocale(lockd.HasGlyph)
 	view.TextScale = lockd.SystemTextScale()
 
 	model := &input.Model{}
@@ -459,4 +459,15 @@ func effectChoices() []string {
 		}
 	}
 	return out
+}
+
+// resolveLocale keeps the session language only while the lock font can draw
+// its catalog; without the glyphs the user reads English, not empty boxes.
+func resolveLocale(has func(rune) bool) string {
+	locale := i18n.Resolve()
+	if !i18n.Renderable(locale, has) {
+		fmt.Fprintln(os.Stderr, "sysc-lock: font lacks glyphs for", locale, "; using English")
+		return "en"
+	}
+	return locale
 }

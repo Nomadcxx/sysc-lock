@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 )
 
 func TestMatch(t *testing.T) {
@@ -111,5 +113,44 @@ func TestCatalogsAreConsistent(t *testing.T) {
 				t.Fatalf("%s missing/empty %q", loc, k)
 			}
 		}
+	}
+}
+
+func TestRenderableRejectsMissingRunes(t *testing.T) {
+	// The fake font covers everything up to CJK-ish blocks, like Go Mono and
+	// Fira Code: Latin, Cyrillic and punctuation resolve; kana and hangul do not.
+	has := func(r rune) bool { return r <= 0x2FFF }
+	for _, tc := range []struct {
+		locale string
+		want   bool
+	}{
+		{"en", true}, {"es", true}, {"pt", true}, {"ru", true},
+		{"ja", false}, {"ko", false},
+		{"de", true}, // unknown locale draws English literals
+	} {
+		if got := Renderable(tc.locale, has); got != tc.want {
+			t.Errorf("Renderable(%q) = %v, want %v", tc.locale, got, tc.want)
+		}
+	}
+}
+
+func TestRenderableIgnoresOnlyWhitespaceAndASCIIPunctuation(t *testing.T) {
+	// The guard never asks the font about whitespace or ASCII punctuation:
+	// every lock font carries them. Any other rune must be covered.
+	has := func(r rune) bool {
+		return !unicode.IsSpace(r) && !(r < utf8.RuneSelf && unicode.IsPunct(r))
+	}
+	for _, locale := range []string{"es", "pt", "ru", "ja", "ko"} {
+		if !Renderable(locale, has) {
+			t.Fatalf("Renderable(%q) consulted the font about whitespace or ASCII punctuation", locale)
+		}
+	}
+	// One missing non-ignorable rune rejects its catalog.
+	has = func(r rune) bool { return r != '認' }
+	if Renderable("ja", has) {
+		t.Fatal("a single missing kanji must reject ja")
+	}
+	if !Renderable("ru", has) {
+		t.Fatal("a missing kanji must not affect ru")
 	}
 }

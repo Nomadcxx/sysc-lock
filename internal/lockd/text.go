@@ -13,6 +13,7 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gomono"
 	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 
 	"github.com/Nomadcxx/sysc-lock/internal/ambient"
@@ -186,12 +187,26 @@ func drawTextBoxAlign(fb *render.Framebuffer, box image.Rectangle, baseline int,
 	d.DrawString(text)
 }
 
+// HasGlyph reports whether the active lock font draws r. It resolves the font
+// like face() but reports a parse failure as no coverage instead of panicking,
+// so the locale guard can fall back to English before the lock is requested.
+func HasGlyph(r rune) bool {
+	if parsed == nil {
+		f, err := opentype.Parse(fontBytes())
+		if err != nil {
+			return false
+		}
+		parsed = f
+	}
+	idx, err := parsed.GlyphIndex(&sfnt.Buffer{}, r)
+	return err == nil && idx != 0
+}
+
 // Covered reports whether the lock font draws r. The owner hands it to the
 // ambient formatter, so metadata the font cannot show is replaced rather than
 // drawn as '?'.
 func Covered(r rune) bool {
-	_, ok := face(14).GlyphAdvance(r)
-	return ok
+	return HasGlyph(r)
 }
 
 // drawRuns draws styled spans on one baseline inside box, right-aligned when

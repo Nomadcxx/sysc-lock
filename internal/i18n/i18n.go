@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 )
 
 var codes = []string{"en", "es", "pt", "ja", "ko", "ru"}
@@ -99,6 +101,31 @@ func load() {
 		}
 		byLocale[locale] = m
 	}
+}
+
+// Renderable reports whether the active font can draw every catalog value for
+// locale: the lock screen must never show a language it renders as
+// missing-glyph boxes. English, unknown locales and a missing catalog draw the
+// literal keys, so they need no coverage.
+func Renderable(locale string, has func(rune) bool) bool {
+	loadOnce.Do(load)
+	for _, s := range byLocale[locale] {
+		for _, r := range s {
+			if ignorableRune(r) {
+				continue
+			}
+			if !has(r) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// ignorableRune reports whether r never needs a glyph check: whitespace and
+// ASCII punctuation belong to every lock font.
+func ignorableRune(r rune) bool {
+	return unicode.IsSpace(r) || (r < utf8.RuneSelf && unicode.IsPunct(r))
 }
 
 // T returns the translation of the exact English literal, or the literal
