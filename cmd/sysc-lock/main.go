@@ -187,6 +187,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			return
 		}
 		submit, editErr := gate.press(model, &view.Reveal, k, now)
+		clearTerminalErrorAfterInput(view, k)
 		if editErr != nil {
 			view.SetError(editErr.Error(), time.Now())
 		}
