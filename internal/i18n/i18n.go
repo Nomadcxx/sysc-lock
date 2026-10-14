@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 var codes = []string{"en", "es", "pt", "ja", "ko", "ru"}
@@ -99,6 +100,25 @@ func load() {
 		}
 		byLocale[locale] = m
 	}
+}
+
+// Renderable reports whether has draws every rune the locale's catalog needs.
+// A locale the active face cannot draw would show missing-glyph boxes instead
+// of text, so callers fall back to English rather than render nothing legible.
+// English has no catalog, so it is always renderable.
+func Renderable(locale string, has func(rune) bool) bool {
+	loadOnce.Do(load)
+	for _, translated := range byLocale[locale] {
+		for _, r := range translated {
+			if unicode.IsSpace(r) {
+				continue
+			}
+			if !has(r) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // T returns the translation of the exact English literal, or the literal

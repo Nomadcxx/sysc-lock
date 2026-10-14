@@ -113,3 +113,30 @@ func TestCatalogsAreConsistent(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderableRejectsMissingRunes pins the guard that stops the lock screen
+// offering a catalog the font cannot draw: a face without CJK must reject ja
+// and ko, while the Latin-1 and Cyrillic catalogs stay renderable.
+func TestRenderableRejectsMissingRunes(t *testing.T) {
+	noCJK := func(r rune) bool { return r <= 0x2FFF }
+	for _, tc := range []struct {
+		locale string
+		want   bool
+	}{
+		{"en", true}, {"es", true}, {"pt", true}, {"ru", true},
+		{"ja", false}, {"ko", false},
+		{"de", true}, // no catalog, nothing to draw
+	} {
+		if got := Renderable(tc.locale, noCJK); got != tc.want {
+			t.Errorf("Renderable(%q) = %v, want %v", tc.locale, got, tc.want)
+		}
+	}
+}
+
+func TestRenderableIgnoresWhitespace(t *testing.T) {
+	for _, r := range []rune{' ', '\t', '\n'} {
+		if !Renderable("ru", func(g rune) bool { return g != r }) {
+			t.Errorf("whitespace rune %U rejected", r)
+		}
+	}
+}
