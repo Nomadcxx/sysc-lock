@@ -1,9 +1,6 @@
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/wordmark.png">
-    <img src="assets/wordmark-light.png" alt="sysc-lock" height="64">
-  </picture>
+  <img src="assets/header.webp" alt="sysc-lock" height="64">
 </p>
 
 
@@ -12,8 +9,8 @@ PAM authentication. It supports Niri and sysc-shell.
 
 <table>
   <tr>
-    <td align="center" valign="top"><img src="assets/screens/lock-main.png" alt="The sysc-lock main screen" width="480"><br><sub>The lock screen, with the blurred desktop backdrop</sub></td>
-    <td align="center" valign="top"><img src="assets/screens/lock-cross-logo.png" alt="sysc-lock with the cross-logo background effect" width="480"><br><sub>The cross-logo background effect</sub></td>
+    <td align="center" valign="top"><img loading="lazy" src="assets/screens/lock-main.png" alt="The sysc-lock main screen" width="480"><br><sub>The lock screen, with the blurred desktop backdrop</sub></td>
+    <td align="center" valign="top"><img loading="lazy" src="assets/screens/lock-cross-logo.png" alt="sysc-lock with the cross-logo background effect" width="480"><br><sub>The cross-logo background effect</sub></td>
   </tr>
 </table>
 
