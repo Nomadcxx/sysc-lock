@@ -352,6 +352,29 @@ func TestKillAmbientNilIsSafe(t *testing.T) {
 	t.Cleanup(killAmbient(nil))
 }
 
+func TestDeferredAmbientStopUsesStartedChild(t *testing.T) {
+	var child ambientChild
+	var cmd *exec.Cmd
+	func() {
+		defer child.stop()
+		cmd = exec.Command("sleep", "30")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if cmd.ProcessState == nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				_ = cmd.Wait()
+			}
+		})
+		child = ambientChild{cmd}
+	}()
+	if cmd.ProcessState == nil {
+		t.Fatal("deferred stop did not reap the started ambient child")
+	}
+}
+
 func TestKillAmbientReapsAChildThatIgnoresTerm(t *testing.T) {
 	ready := filepath.Join(t.TempDir(), "ready")
 	cmd := exec.Command("sh", "-c", `trap "" TERM; echo x > "$1"; while true; do sleep 1; done`, "sh", ready)

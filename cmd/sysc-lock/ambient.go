@@ -68,7 +68,8 @@ func applyMediaSettings(st ambient.Status, cfg config.Config) (ambient.Status, b
 }
 
 // ambientChild is the running collector, or the zero value when it never
-// started; stop is safe either way.
+// started; stop is safe either way. Its pointer receiver lets a deferred call
+// see a child assigned after the defer is registered.
 type ambientChild struct{ cmd *exec.Cmd }
 
 // startAmbient re-execs this binary with --ambient in its own process group
@@ -81,7 +82,7 @@ func startAmbient() ambientChild {
 		return ambientChild{}
 	}
 	cmd := exec.Command(exe, "--ambient")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "sysc-lock: ambient collector not started: %v\n", err)
 		return ambientChild{}
@@ -89,7 +90,11 @@ func startAmbient() ambientChild {
 	return ambientChild{cmd}
 }
 
-func (c ambientChild) stop() { killAmbient(c.cmd)() }
+func (c *ambientChild) stop() {
+	cmd := c.cmd
+	c.cmd = nil
+	killAmbient(cmd)()
+}
 
 // killAmbient terminates the collector's process group and reaps it. The
 // returned func is always non-nil and safe on a nil command.

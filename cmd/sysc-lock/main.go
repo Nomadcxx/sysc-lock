@@ -324,6 +324,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		fmt.Fprintln(os.Stderr, "sysc-lock: connection lost:", err)
 		return client.State().Phase(), err
 	}
+	amb.stop()
 	return client.State().Phase(), client.WaitBackground()
 }
 
