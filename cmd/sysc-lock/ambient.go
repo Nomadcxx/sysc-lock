@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -14,16 +15,33 @@ import (
 	"github.com/Nomadcxx/sysc-lock/internal/lockd"
 )
 
-// runAmbient collects the ambient snapshot once a second until SIGTERM. The
-// locker owner spawns it after sealing and kills it on the way out.
-func runAmbient() error {
+// runAmbient collects the ambient snapshot once a second until SIGTERM or its
+// locker exits. A zero parentPID leaves manually started collectors unbound.
+func runAmbient(parentPID int) error {
 	path := ambient.Path()
 	if path == "" {
 		return fmt.Errorf("XDG_RUNTIME_DIR not set")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return ambient.Run(ctx, path, time.Second, ambient.NewGather())
+	if !stopAmbientIfParentChanged(parentPID, stop) {
+		return nil
+	}
+	gather := ambient.NewGather()
+	return ambient.Run(ctx, path, time.Second, func(now time.Time) ambient.Snapshot {
+		if !stopAmbientIfParentChanged(parentPID, stop) {
+			return ambient.Snapshot{}
+		}
+		return gather(now)
+	})
+}
+
+func stopAmbientIfParentChanged(parentPID int, stop context.CancelFunc) bool {
+	if parentPID == 0 || os.Getppid() == parentPID {
+		return true
+	}
+	stop()
+	return false
 }
 
 // loadAmbient reads the snapshot file and formats the corner and caption.
@@ -73,16 +91,16 @@ func applyMediaSettings(st ambient.Status, cfg config.Config) (ambient.Status, b
 type ambientChild struct{ cmd *exec.Cmd }
 
 // startAmbient re-execs this binary with --ambient in its own process group
-// so the whole group dies with the locker. A start failure is one stderr line
-// and a no-op child: the lock must still work without the row.
+// so stop can terminate the collector and any subprocesses. A start failure is
+// one stderr line and a no-op child: the lock must still work without the row.
 func startAmbient() ambientChild {
 	exe, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sysc-lock: ambient collector not started: %v\n", err)
 		return ambientChild{}
 	}
-	cmd := exec.Command(exe, "--ambient")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
+	cmd := exec.Command(exe, "--ambient", strconv.Itoa(os.Getpid()))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "sysc-lock: ambient collector not started: %v\n", err)
 		return ambientChild{}
