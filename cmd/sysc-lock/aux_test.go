@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"github.com/Nomadcxx/sysc-lock/internal/ambient"
@@ -350,6 +351,40 @@ func TestArmAmbientOnlyAfterLocked(t *testing.T) {
 
 func TestKillAmbientNilIsSafe(t *testing.T) {
 	t.Cleanup(killAmbient(nil))
+}
+
+func TestAmbientCollectorStopsWhenParentChanges(t *testing.T) {
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	if !stopAmbientIfParentChanged(os.Getppid(), stop) || ctx.Err() != nil {
+		t.Fatal("collector stopped while its locker was alive")
+	}
+	if stopAmbientIfParentChanged(os.Getppid()+1, stop) || ctx.Err() == nil {
+		t.Fatal("collector continued after its locker exited")
+	}
+}
+
+func TestDeferredAmbientStopUsesStartedChild(t *testing.T) {
+	var child ambientChild
+	var cmd *exec.Cmd
+	func() {
+		defer child.stop()
+		cmd = exec.Command("sleep", "30")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if cmd.ProcessState == nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				_ = cmd.Wait()
+			}
+		})
+		child = ambientChild{cmd}
+	}()
+	if cmd.ProcessState == nil {
+		t.Fatal("deferred stop did not reap the started ambient child")
+	}
 }
 
 func TestKillAmbientReapsAChildThatIgnoresTerm(t *testing.T) {

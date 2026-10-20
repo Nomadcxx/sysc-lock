@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -41,13 +42,20 @@ func main() {
 	case len(os.Args) == 2 && os.Args[1] == "--session":
 		err = runSession()
 	case len(os.Args) == 2 && os.Args[1] == "--ambient":
-		err = runAmbient()
+		err = runAmbient(0)
+	case len(os.Args) == 3 && os.Args[1] == "--ambient":
+		parentPID, parseErr := strconv.Atoi(os.Args[2])
+		if parseErr != nil || parentPID < 1 {
+			err = fmt.Errorf("invalid ambient parent PID")
+		} else {
+			err = runAmbient(parentPID)
+		}
 	case len(os.Args) == 2 && os.Args[1] == "--preview":
 		err = runPreview(os.Stdin, os.Stdout)
 	case len(os.Args) == 2 && os.Args[1] == "--describe":
 		err = writeDescription(os.Stdout)
 	default:
-		err = fmt.Errorf("usage: sysc-lock [--session|--version|--ambient|--preview|--describe]")
+		err = fmt.Errorf("usage: sysc-lock [--session|--version|--ambient [parent-pid]|--preview|--describe]")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sysc-lock:", err)
@@ -324,6 +332,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 		fmt.Fprintln(os.Stderr, "sysc-lock: connection lost:", err)
 		return client.State().Phase(), err
 	}
+	amb.stop()
 	return client.State().Phase(), client.WaitBackground()
 }
 
