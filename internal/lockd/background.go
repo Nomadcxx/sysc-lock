@@ -105,6 +105,7 @@ func newBackgroundWorker(effect, palette string, wallpaper *wallpaperAsset, wake
 						frame = backgroundFrame{width: job.width, height: job.height, pixels: make([]byte, job.width*job.height*4)}
 						fb := render.Framebuffer{Width: job.width, Height: job.height, Stride: job.width * 4, Pix: frame.pixels}
 						fb.Cover(img)
+						DimBackground(frame.pixels)
 					}
 				} else {
 					start := time.Now()

@@ -120,7 +120,12 @@ func (c *Client) captureOutput(out *lockOut, deadline time.Time) {
 	if blur == nil {
 		return
 	}
-	out.backdrop, out.blurW, out.blurH = blur, int(width), int(height)
+	out.setCapturedBackdrop(blur, int(width), int(height))
+}
+
+func (out *lockOut) setCapturedBackdrop(blur *render.Framebuffer, width, height int) {
+	DimBackground(blur.Pix)
+	out.backdrop, out.blurW, out.blurH = blur, width, height
 }
 
 // pumpUntil waits for compositor events before Lock without making a timeout

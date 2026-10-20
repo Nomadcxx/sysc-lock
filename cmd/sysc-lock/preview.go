@@ -76,7 +76,7 @@ func runPreview(in io.Reader, out io.Writer) error {
 	fb := render.New(req.Width, req.Height)
 	var background []byte
 	if req.Config.Effect != config.EffectNone {
-		r, err := renderer.New(renderer.Config{Effect: req.Config.Effect, Palette: req.Config.Palette, Width: req.Width, Height: req.Height})
+		r, err := renderer.New(renderer.Config{Effect: req.Config.Effect, Palette: req.Config.Palette, Width: req.Width, Height: req.Height, DimOutput: true})
 		if err != nil {
 			return err
 		}
@@ -90,7 +90,6 @@ func runPreview(in io.Reader, out io.Writer) error {
 		if _, err = r.Draw(background, fb.Stride, nil); err != nil {
 			return err
 		}
-		lockd.DimBackground(background)
 	}
 	paint := func(at time.Time) {
 		if background == nil {

@@ -208,6 +208,39 @@ func BenchmarkForeground1080p(b *testing.B) {
 	}
 }
 
+func BenchmarkOwnerFrame(b *testing.B) {
+	const width, height = 3440, 1440
+	frameAt := time.Now().Add(-time.Hour)
+	for _, tc := range []struct {
+		name        string
+		dimPerFrame bool
+	}{{"copy-dim-foreground", true}, {"dimmed-copy-foreground", false}} {
+		b.Run(tc.name, func(b *testing.B) {
+			view := NewView(theme.Default(), "nomadx", "archPC")
+			view.Scale = 1
+			background := make([]byte, width*height*4)
+			for i := 0; i < len(background); i += 4 {
+				background[i], background[i+1], background[i+2], background[i+3] = 90, 120, 180, 255
+			}
+			if !tc.dimPerFrame {
+				DimBackground(background)
+			}
+			fb := &render.Framebuffer{Width: width, Height: height, Stride: width * 4, Pix: make([]byte, len(background))}
+			view.RenderForeground(fb, frameAt)
+			b.SetBytes(int64(len(background)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				copy(fb.Pix, background)
+				if tc.dimPerFrame {
+					DimBackground(fb.Pix)
+				}
+				view.RenderForeground(fb, frameAt)
+			}
+		})
+	}
+}
+
 func TestFillRectClipsWithoutAllocating(t *testing.T) {
 	fb := render.New(8, 6)
 	fb.Fill(color.NRGBA{R: 17})

@@ -224,7 +224,6 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			view.Render(fb, now)
 		} else {
 			copy(fb.Pix, background)
-			lockd.DimBackground(fb.Pix)
 			view.RenderForeground(fb, now)
 		}
 		return nil

@@ -218,8 +218,8 @@ func TestWallpaperSharedDecodeSurvivesFileRemovalAndAlternatingOutputs(t *testin
 	for range 10 {
 		a = takeWallpaperFrame(t, first, 4, 4, a)
 		b = takeWallpaperFrame(t, second, 8, 6, b)
-		if a.pixels[2] != 200 || b.pixels[2] != 200 {
-			t.Fatal("shared image not preserved")
+		if a.pixels[2] != 66 || b.pixels[2] != 66 {
+			t.Fatal("shared dimmed image not preserved")
 		}
 	}
 }

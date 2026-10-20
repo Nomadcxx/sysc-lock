@@ -102,8 +102,8 @@ func TestGpuRedRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < len(dst); i += 4 {
-		if got := dst[i : i+4]; !bytes.Equal(got, []byte{0, 0, 255, 255}) {
-			t.Fatalf("pixel %d: want {0,0,255,255} BGRA, got %v", i/4, got)
+		if got := dst[i : i+4]; !bytes.Equal(got, []byte{0, 0, 85, 255}) {
+			t.Fatalf("pixel %d: want {0,0,85,255} dimmed BGRA, got %v", i/4, got)
 		}
 	}
 	if n := b.glErrors(); n != 0 {
@@ -126,15 +126,15 @@ func TestGpuOverlappingBackendsSurviveClose(t *testing.T) {
 			}
 		}
 	}
-	draw(first, [4]float32{1, 0, 0, 1}, []byte{0, 0, 255, 255})
-	draw(second, [4]float32{0, 0, 1, 1}, []byte{255, 0, 0, 255})
+	draw(first, [4]float32{1, 0, 0, 1}, []byte{0, 0, 85, 255})
+	draw(second, [4]float32{0, 0, 1, 1}, []byte{85, 0, 0, 255})
 	if err := second.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := first.Resize(3, 3); err != nil {
 		t.Fatal("closing another backend invalidated the survivor:", err)
 	}
-	draw(first, [4]float32{1, 0, 0, 1}, []byte{0, 0, 255, 255})
+	draw(first, [4]float32{1, 0, 0, 1}, []byte{0, 0, 85, 255})
 }
 
 // The worker hands rows wider than the image; only the first w pixels of each
@@ -149,7 +149,7 @@ func TestGpuDrawHonorsStride(t *testing.T) {
 	}
 	want := func(x, y int) byte {
 		if x < w*4 {
-			return []byte{0, 0, 255, 255}[x%4]
+			return []byte{0, 0, 85, 255}[x%4]
 		}
 		return sentinel
 	}
@@ -176,9 +176,18 @@ func TestGpuTightReadbackUsesRowStorage(t *testing.T) {
 func TestFlipRGBAToBGRAOddHeight(t *testing.T) {
 	pixels := []byte{1, 2, 3, 0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23}
 	flipRGBAToBGRA(pixels, make([]byte, 8))
-	want := []byte{18, 17, 16, 255, 22, 21, 20, 255, 10, 9, 8, 255, 14, 13, 12, 255, 3, 2, 1, 255, 6, 5, 4, 255}
+	want := []byte{6, 5, 5, 255, 7, 7, 6, 255, 3, 3, 2, 255, 4, 4, 4, 255, 1, 0, 0, 255, 2, 1, 1, 255}
 	if !bytes.Equal(pixels, want) {
 		t.Fatalf("converted rows = %v, want %v", pixels, want)
+	}
+}
+
+func TestFlipRGBAToBGRADimsRGBAndSealsAlpha(t *testing.T) {
+	pixels := []byte{200, 100, 50, 0, 10, 20, 30, 99}
+	flipRGBAToBGRA(pixels, make([]byte, 8))
+	want := []byte{16, 33, 66, 255, 10, 6, 3, 255}
+	if !bytes.Equal(pixels, want) {
+		t.Fatalf("dimmed converted row = %v, want %v", pixels, want)
 	}
 }
 
