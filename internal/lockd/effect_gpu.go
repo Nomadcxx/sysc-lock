@@ -475,9 +475,9 @@ func (b *gpuBackend) readback(pixels []byte, stride int) error {
 		s := b.scratch[(b.h-1-y)*rowBytes:]
 		p := pixels[dst : dst+rowBytes]
 		for i := 0; i+3 < rowBytes; i += 4 {
-			p[i+0] = s[i+2] // B
-			p[i+1] = s[i+1] // G
-			p[i+2] = s[i+0] // R
+			p[i+0] = s[i+2] / 3 // B
+			p[i+1] = s[i+1] / 3 // G
+			p[i+2] = s[i+0] / 3 // R
 			p[i+3] = 0xff
 		}
 	}
@@ -493,7 +493,8 @@ func flipRGBAToBGRA(pixels, row []byte) {
 		copy(pixels[bottom:bottom+stride], row)
 	}
 	for i := 0; i < len(pixels); i += 4 {
-		pixels[i], pixels[i+2], pixels[i+3] = pixels[i+2], pixels[i], 0xff
+		r, g, b := pixels[i], pixels[i+1], pixels[i+2]
+		pixels[i], pixels[i+1], pixels[i+2], pixels[i+3] = b/3, g/3, r/3, 0xff
 	}
 }
 

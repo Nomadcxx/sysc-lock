@@ -27,7 +27,7 @@ type cpuBackend struct {
 }
 
 func newCpuBackend(effect, palette string, width, height int) (EffectBackend, error) {
-	r, err := renderer.New(renderer.Config{Effect: effect, Palette: palette, Width: width, Height: height, PixelSize: 12})
+	r, err := renderer.New(renderer.Config{Effect: effect, Palette: palette, Width: width, Height: height, PixelSize: 12, DimOutput: true})
 	if err != nil {
 		return nil, err
 	}

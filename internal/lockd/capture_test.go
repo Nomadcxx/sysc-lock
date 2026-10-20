@@ -1,6 +1,7 @@
 package lockd
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 	"net"
@@ -248,6 +249,23 @@ func TestUpscaleBackdropNearestNeighbour(t *testing.T) {
 	at := func(x, y int) byte { return dst[(y*4+x)*4] }
 	if at(0, 0) != 10 || at(1, 0) != 10 || at(2, 0) != 20 || at(3, 3) != 40 || at(0, 2) != 30 {
 		t.Fatalf("nearest stretch wrong: %v %v %v %v %v", at(0, 0), at(1, 0), at(2, 0), at(3, 3), at(0, 2))
+	}
+}
+
+func TestCapturedBackdropIsDimmedOnceBeforeUpscale(t *testing.T) {
+	src := render.New(1, 1)
+	copy(src.Pix, []byte{200, 100, 50, 255})
+	out := &lockOut{w: 2, h: 2}
+	out.setCapturedBackdrop(src, 2, 2)
+	if want := []byte{66, 33, 16, 255}; !bytes.Equal(src.Pix, want) {
+		t.Fatalf("cached blur = %v, want %v", src.Pix, want)
+	}
+	dst := make([]byte, 2*2*4)
+	out.upscaleBackdrop(dst)
+	for i := 0; i < len(dst); i += 4 {
+		if !bytes.Equal(dst[i:i+4], []byte{66, 33, 16, 255}) {
+			t.Fatalf("upscaled pixel %d = %v, want one-third RGB with opaque alpha", i/4, dst[i:i+4])
+		}
 	}
 }
 
