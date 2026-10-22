@@ -8,6 +8,8 @@ github.com/Nomadcxx/sysc-Go v1.0.6-0.20261008172414-1ff1f6c3c8d0 h1:nnGYcGEfQ6eR
 github.com/Nomadcxx/sysc-Go v1.0.6-0.20261008172414-1ff1f6c3c8d0/go.mod h1:aVjiviCJEgKIQy0AZ2uQbf+V36JG8ZQLDO4ZtZ9wcQk=
 github.com/Nomadcxx/sysc-Go v1.0.7 h1:fj0MgMD2g+0IntWxQnvkAVxjhxuF6qMbcilS/hM0U7s=
 github.com/Nomadcxx/sysc-Go v1.0.7/go.mod h1:aVjiviCJEgKIQy0AZ2uQbf+V36JG8ZQLDO4ZtZ9wcQk=
+github.com/Nomadcxx/sysc-Go v1.0.9-0.20261022080948-51b43b6e52a7 h1:SdldQINWd6426429uBNO5pTk8U1C1os60Ss9GmuBtjM=
+github.com/Nomadcxx/sysc-Go v1.0.9-0.20261022080948-51b43b6e52a7/go.mod h1:aVjiviCJEgKIQy0AZ2uQbf+V36JG8ZQLDO4ZtZ9wcQk=
 github.com/Nomadcxx/sysc-terminal v0.0.0-20261006055903-edd5206704ce h1:maFNzPnNIcT2XwuFv5rPRrT5BloEKJGdBBvO77Taa1U=
 github.com/Nomadcxx/sysc-terminal v0.0.0-20261006055903-edd5206704ce/go.mod h1:ImVJ/CFdR8cBqWeLcfzJcZnfvvVuhQxDSR79E/AFm1k=
 github.com/Nomadcxx/sysc-terminal v0.1.1-0.20261008043618-9d72a796e922 h1:6EnC1TOc9l6+E6FfSnGKY9SOsQ5nZjeCv0TpsNMhqn8=
@@ -20,6 +22,8 @@ github.com/Nomadcxx/sysc-terminal v0.2.0 h1:0GZ6mV4gbB8px/hhqYm3da4DF6jYzZm9clZh
 github.com/Nomadcxx/sysc-terminal v0.2.0/go.mod h1:eJSkOSQvKGtpWNHSVbT2R/cwVbn8FtYi1Z5DfkYQndE=
 github.com/Nomadcxx/sysc-terminal v0.2.1 h1:96amSaeQB5RGqmlQiyaUFCcYf24sNZ+jxTfa920ql9Q=
 github.com/Nomadcxx/sysc-terminal v0.2.1/go.mod h1:eJSkOSQvKGtpWNHSVbT2R/cwVbn8FtYi1Z5DfkYQndE=
+github.com/Nomadcxx/sysc-terminal v0.2.2-0.20261022013002-57dd64b663ae h1:8M9vGMwcmExFec0um4ad1mxDeipkTT6XWCiykudjTVs=
+github.com/Nomadcxx/sysc-terminal v0.2.2-0.20261022013002-57dd64b663ae/go.mod h1:cXtcffkkkvDvWPhOyeYWMgkiNVKdsTm6wE306RltSHg=
 github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1 h1:b/fota81Abko+zPV8AhLKp4kvLtJhz9R/sCNntG6iZ8=
 github.com/Nomadcxx/sysc-wayland v0.3.2-rc.1/go.mod h1:ZNAe41EM7R5G2KA55jqMPotAvrjVWcMq21BV69gROKA=
 github.com/Nomadcxx/sysc-wayland v0.3.2 h1:3QV9+Duzbe5nVbGRvyX8Gtxol0vMpPsXu2q6/Mwyrhc=
