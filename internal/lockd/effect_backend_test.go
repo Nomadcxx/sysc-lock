@@ -2,10 +2,45 @@ package lockd
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
+	"github.com/Nomadcxx/sysc-lock/internal/config"
 	"github.com/Nomadcxx/sysc-terminal/renderer"
 )
+
+func TestApprovedModelEffectsRenderOnCPU(t *testing.T) {
+	models := []string{
+		"l2a1-sar",
+		"jesus-christ-statue", "jason", "nymphe-der-flora", "lowe", "roman-gladiator", "grabfigur",
+		"laocoon-and-his-sons", "napoleon-bust", "brandenburg-gate", "louis-xiv", "engel", "st-george",
+		"santa-muerte", "aspasia", "st-nepomuk", "lion-statue",
+		"f-14-tomcat", "f-15e-strike-eagle", "f-22-raptor", "fa-18e-super-hornet",
+	}
+	effects := config.Effects()
+	for _, effect := range models {
+		t.Run(effect, func(t *testing.T) {
+			if !slices.Contains(effects, effect) {
+				t.Fatalf("sysc-lock effect catalog omits %q", effect)
+			}
+			if err := (config.Config{Effect: effect, Palette: "nord"}).Validate(); err != nil {
+				t.Fatalf("sysc-lock rejects %q: %v", effect, err)
+			}
+			backend, err := newCpuBackend(effect, "nord", 64, 48)
+			if err != nil {
+				t.Fatalf("construct CPU renderer for %q: %v", effect, err)
+			}
+			defer backend.Close()
+			if err := backend.Step(); err != nil {
+				t.Fatalf("step %q: %v", effect, err)
+			}
+			pixels := make([]byte, 64*48*4)
+			if err := backend.Draw(pixels, 64*4); err != nil {
+				t.Fatalf("draw %q: %v", effect, err)
+			}
+		})
+	}
+}
 
 // cpuBackend must be a pure pass-through: same renderer, same pixels, same
 // stride. The effects read the global rand source, so two independent

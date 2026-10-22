@@ -47,4 +47,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --latest \
             --title "sysc-lock $GITHUB_REF_NAME" \
-            --notes 'Session locker for Niri with PAM authentication, themed effects and sysc-shell theme following. Linux amd64; requires glibc, libpam, EGL and GLES runtime libraries. See README for installation and configuration.'
+            --notes 'Session locker for Niri with PAM authentication, themed effects and sysc-shell theme following. Adds the L2A1 SAR, historical and religious statues and monuments, and four rotating fighter aircraft. Linux amd64; requires glibc, libpam, EGL and GLES runtime libraries. See README for installation and configuration.'
