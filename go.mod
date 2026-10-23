@@ -3,8 +3,8 @@ module github.com/Nomadcxx/sysc-lock
 go 1.26.0
 
 require (
-	github.com/Nomadcxx/sysc-Go v1.0.9-0.20261022080948-51b43b6e52a7
-	github.com/Nomadcxx/sysc-terminal v0.2.2-0.20261022013002-57dd64b663ae
+	github.com/Nomadcxx/sysc-Go v1.0.10-0.20261023083455-149dd471d2df
+	github.com/Nomadcxx/sysc-terminal v0.2.2-0.20261023093933-73b69d4f7537
 	github.com/Nomadcxx/sysc-wayland v0.3.2
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -12,6 +12,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/charmbracelet/x/term v0.2.1
 	github.com/godbus/dbus/v5 v5.2.2
+	github.com/mattn/go-runewidth v0.0.16
 	github.com/msteinert/pam/v2 v2.1.0
 	github.com/thegrumpylion/xkb-go v0.1.0
 	golang.org/x/image v0.46.0
@@ -31,7 +32,6 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
-	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
