@@ -1,0 +1,10 @@
+name: CI setup
+
+description: Install PAM and EGL/GLES headers required by sysc-lock tests.
+
+runs:
+  using: composite
+  steps:
+    - name: Install PAM and EGL/GLES build dependencies
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpam0g-dev libegl1-mesa-dev libgles2-mesa-dev
