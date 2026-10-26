@@ -231,10 +231,8 @@ func (s *Session) Arm(take func() (func(), error)) {
 }
 func (s *Session) PrepareSleep(now time.Time, limit time.Duration) error {
 	s.mu.Lock()
-	if !s.sleeping {
-		s.sleeping = true
-		s.deadline = now.Add(max(time.Millisecond, limit-100*time.Millisecond))
-	}
+	s.sleeping = true
+	s.deadline = now.Add(max(time.Millisecond, limit-100*time.Millisecond))
 	// Unlock is confirmed, but the old core may still own cleanup. Stage the
 	// next durable intent now; End queues it only after that cleanup completes.
 	if s.active && s.marker.Intent == 0 {
@@ -272,6 +270,14 @@ func (s *Session) PrepareSleep(now time.Time, limit time.Duration) error {
 	}
 	_, err := s.Lock()
 	return err
+}
+func (s *Session) SleepDeadline() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.sleeping || s.release == nil {
+		return time.Time{}, false
+	}
+	return s.deadline, true
 }
 func (s *Session) CheckSleepDeadline(now time.Time) {
 	s.mu.Lock()
