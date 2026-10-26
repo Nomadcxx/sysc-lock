@@ -90,3 +90,26 @@ func TestWaylandPeerMatchesNiriPeer(t *testing.T) {
 		}
 	}
 }
+
+func TestSupportedCompositor(t *testing.T) {
+	for _, executable := range []string{
+		"/usr/bin/niri",
+		"/usr/local/bin/sysc-compositor",
+		"niri",
+		"sysc-compositor",
+	} {
+		if !supportedCompositor(executable) {
+			t.Errorf("rejected supported compositor %q", executable)
+		}
+	}
+	for _, executable := range []string{
+		"",
+		"/usr/local/bin/sysc-compositor-helper",
+		"/usr/bin/gnome-shell",
+		"/usr/local/bin/sysc-compositor-old",
+	} {
+		if supportedCompositor(executable) {
+			t.Errorf("accepted foreign executable %q", executable)
+		}
+	}
+}

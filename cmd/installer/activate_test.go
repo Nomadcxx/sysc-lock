@@ -96,13 +96,13 @@ func installWithCandidate(t *testing.T, opts options) *runner {
 	return r
 }
 
-func TestInstallEnablesAndStartsInsideNiri(t *testing.T) {
+func TestInstallEnablesAndStartsInsideGraphicalSession(t *testing.T) {
 	opts := activationHome(t)
 	f := useManager(t)
 	path := writeShellConfig(t, `{"theme":{"preset":"expressive"},"weather":{"latitude":-37.6}}`)
 	r := installWithCandidate(t, opts)
 
-	want := "daemon-reload\nenable sysc-lock-session.service\nis-active --quiet niri.service\nrestart sysc-lock-session.service"
+	want := "daemon-reload\nenable sysc-lock-session.service\nis-active --quiet graphical-session.target\nrestart sysc-lock-session.service"
 	if got := f.log(); got != want {
 		t.Fatalf("systemctl --user calls:\n%s\nwant:\n%s", got, want)
 	}
@@ -128,14 +128,14 @@ func TestInstallEnablesAndStartsInsideNiri(t *testing.T) {
 	}
 }
 
-func TestInstallOutsideNiriEnablesOnly(t *testing.T) {
+func TestInstallOutsideGraphicalSessionEnablesOnly(t *testing.T) {
 	opts := activationHome(t)
 	f := useManager(t, "is-active")
 	r := installWithCandidate(t, opts)
 	if strings.Contains(f.log(), "restart") {
-		t.Fatalf("started outside Niri: %s", f.log())
+		t.Fatalf("started outside a graphical session: %s", f.log())
 	}
-	if !strings.Contains(strings.Join(r.snapshot().notes, "\n"), "starts with your next Niri session") {
+	if !strings.Contains(strings.Join(r.snapshot().notes, "\n"), "starts with your next graphical session") {
 		t.Fatalf("notes = %v", r.snapshot().notes)
 	}
 }
@@ -253,5 +253,27 @@ func TestUninstallStopsAndDisablesFirst(t *testing.T) {
 	}
 	if _, err := os.Stat(opts.prefix + "/bin/sysc-lock"); !os.IsNotExist(err) {
 		t.Fatal("binary survived")
+	}
+}
+
+// The session unit must follow whichever compositor owns the session. Binding
+// a single compositor unit left sysc-compositor sessions unable to stop the
+// lock with the session they belong to.
+func TestSessionUnitBindsTheGraphicalSession(t *testing.T) {
+	unit, err := os.ReadFile("../../contrib/systemd/sysc-lock-session.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(unit)
+	for _, want := range []string{
+		"BindsTo=graphical-session.target\n",
+		"After=graphical-session.target\n",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("session unit lacks %q", strings.TrimSpace(want))
+		}
+	}
+	if strings.Contains(body, "niri.service") {
+		t.Error("session unit still binds a compositor-specific unit")
 	}
 }

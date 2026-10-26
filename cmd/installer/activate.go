@@ -63,9 +63,9 @@ func unitOnSearchPath(prefix string) bool {
 	return err == nil && filepath.Clean(prefix+"/share") == filepath.Clean(data)
 }
 
-// activateService enables the session owner and, inside a running Niri
+// activateService enables the session owner and, inside a running graphical
 // session, (re)starts it so the new binary is the one that answers Lock.
-// Outside Niri the service waits for the next graphical session; starting it
+// Outside a graphical session the service waits for the next one; starting it
 // there would fail its environment checks.
 func activateService(ctx context.Context, r *runner) error {
 	const task = "Activate service"
@@ -93,8 +93,8 @@ func activateService(ctx context.Context, r *runner) error {
 	r.mu.Lock()
 	r.activated = true
 	r.mu.Unlock()
-	if _, err := r.userCtl(ctx, task, "is-active", "--quiet", "niri.service"); err != nil {
-		r.note(unitName + " is enabled and starts with your next Niri session.")
+	if _, err := r.userCtl(ctx, task, "is-active", "--quiet", "graphical-session.target"); err != nil {
+		r.note(unitName + " is enabled and starts with your next graphical session.")
 		return nil
 	}
 	if out, err := r.userCtl(ctx, task, "restart", unitName); err != nil {

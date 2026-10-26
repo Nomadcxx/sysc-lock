@@ -48,7 +48,8 @@ func Publish(conn *dbus.Conn, s *Session) error {
 	return conn.Emit(BusPath, BusName+".Changed", encodeState(s.Snapshot()))
 }
 
-// ValidateNiri uses the startup session, never a first-socket heuristic.
+// ValidateNiri uses the startup session, never a first-socket heuristic. It
+// accepts Niri and sysc-compositor, which keeps Niri's Wayland and IPC surface.
 func ValidateNiri(conn *dbus.Conn) (Identity, error) {
 	id := Identity{UID: uint32(os.Getuid()), Session: os.Getenv("XDG_SESSION_ID")}
 	socket := os.Getenv("NIRI_SOCKET")
@@ -90,8 +91,8 @@ func ValidateNiri(conn *dbus.Conn) (Identity, error) {
 	if err != nil {
 		return id, err
 	}
-	if filepath.Base(executable) != "niri" {
-		return id, fmt.Errorf("registered peer is not Niri")
+	if !supportedCompositor(executable) {
+		return id, fmt.Errorf("registered peer is not a supported compositor")
 	}
 	if err = validateCompositorStartup(cred.Pid, id.Session); err != nil {
 		return id, err
@@ -174,9 +175,21 @@ func socketPeer(path string, uid uint32) (*unix.Ucred, *syscall.Stat_t, error) {
 }
 func sameCompositorPeer(ipc, display *unix.Ucred) error {
 	if ipc == nil || display == nil || ipc.Pid <= 0 || ipc.Pid != display.Pid || ipc.Uid != display.Uid {
-		return fmt.Errorf("Wayland display does not belong to the registered Niri peer")
+		return fmt.Errorf("Wayland display does not belong to the registered compositor peer")
 	}
 	return nil
+}
+
+// supportedCompositor accepts the compositor this suite ships as well as Niri.
+// sysc-compositor keeps Niri's Wayland globals and IPC socket, so the startup
+// and peer checks above prove it belongs to this session just as they do for
+// Niri. A different program owned by the same UID still fails here.
+func supportedCompositor(executable string) bool {
+	switch filepath.Base(executable) {
+	case "niri", "sysc-compositor":
+		return true
+	}
+	return false
 }
 
 const maxStartupEnvironment = 1 << 20

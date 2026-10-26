@@ -93,11 +93,12 @@ enabled; everything else, including `--uninstall`, does not.
 
 The installer writes the binary and unit under the prefix, then activates
 them: `systemctl --user enable` for `sysc-lock-session.service`, and a restart
-when Niri is running so the new binary takes over. Outside Niri the service
-starts with the next Niri session. With the default prefix the unit is on the
-user manager's search path; any other prefix skips activation and says how to
-link the unit. Last, if `~/.config/sysc-shell/config.json` names no locker,
-it gains `"session": {"locker": "sysc-lock"}` and, unless `idle.lock` is set
+when a graphical session is running so the new binary takes over. Outside one
+the service starts with the next graphical session. With the default prefix
+the unit is on the user manager's search path; any other prefix skips
+activation and says how to link the unit. Last, if
+`~/.config/sysc-shell/config.json` names no locker, it gains
+`"session": {"locker": "sysc-lock"}` and, unless `idle.lock` is set
 or the sysc-walls screensaver is enabled, `"idle": {"lock": "5m0s"}`. A locker
 you already chose is left alone. `--uninstall` stops and disables the service
 before removing files. The installer never edits PAM and never uses sudo.
@@ -113,7 +114,8 @@ yay -S sysc-lock
 systemctl --user enable --now sysc-lock-session.service
 ```
 
-Run the service command inside a Niri session started with `niri-session`.
+Run the service command inside a Niri or sysc-compositor session; both reach
+`graphical-session.target`, which the unit binds.
 Starting the session owner does not lock the screen.
 
 [Documentation](https://nomadcxx.github.io/sysc/docs/).
@@ -136,10 +138,11 @@ the artist. On a discharging battery at 10% or less, the form's status row
 says so whenever no error is showing. All of it is a read-only hint, never
 an unlock path.
 
-The service requires Niri's startup environment: XDG_SESSION_ID, NIRI_SOCKET,
-WAYLAND_DISPLAY and XDG_RUNTIME_DIR. Registration verifies the real UID,
-logind Wayland session and Niri IPC peer. One graphical Wayland session per UID
-is supported. Conflicting or stale registration fails explicitly.
+The service requires the startup environment Niri exposes: XDG_SESSION_ID,
+NIRI_SOCKET, WAYLAND_DISPLAY and XDG_RUNTIME_DIR. Registration verifies the
+real UID, logind Wayland session and the compositor IPC peer; both Niri and
+sysc-compositor pass. One graphical Wayland session per UID is supported.
+Conflicting or stale registration fails explicitly.
 
 Presentation loads `$XDG_CONFIG_HOME/sysc-lock/config.json` at each acquisition:
 
