@@ -1,7 +1,10 @@
 [Unit]
 Description=SYSC session lock owner
-BindsTo=niri.service graphical-session.target
-After=niri.service
+# The compositor owns graphical-session.target, whether it is Niri or
+# sysc-compositor. Binding the target covers both and stops the lock with the
+# session, instead of requiring a unit named after one compositor.
+BindsTo=graphical-session.target
+After=graphical-session.target
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
