@@ -72,8 +72,8 @@ func runSession() error {
 		err        error
 	}
 	done := make(chan completed, 1)
-	// ponytail: a 100 ms deadline watchdog covers logind's finite delay, not animation.
-	watchdog := time.NewTicker(100 * time.Millisecond)
+	watchdog := time.NewTimer(time.Hour)
+	watchdog.Stop()
 	defer watchdog.Stop()
 	hinted := false
 	var clearedUnlock uint64
@@ -101,10 +101,12 @@ func runSession() error {
 			if result.phase == lockd.Done && err == nil {
 				owner.Arm(take)
 			}
+			resetSleepDeadlineTimer(watchdog, owner)
 			if err != nil || owner.Snapshot().Phase == "sealed/unknown" {
 				return fmt.Errorf("lock state uncertain; native recovery required (phase %v): %v", result.phase, err)
 			}
 		case <-owner.Changed:
+			resetSleepDeadlineTimer(watchdog, owner)
 			v := owner.Snapshot()
 			if v.Phase == "sealed" && !hinted {
 				if err = logind.SetLocked(sessionPath, true); err != nil {
@@ -140,6 +142,7 @@ func runSession() error {
 						fmt.Fprintln(os.Stderr, "sysc-lock: resume acquisition failed")
 					}
 				}
+				resetSleepDeadlineTimer(watchdog, owner)
 			} else if sig.Name == "org.freedesktop.login1.Session.Lock" && sig.Path == sessionPath {
 				if _, err = owner.Lock(); err != nil {
 					fmt.Fprintln(os.Stderr, "sysc-lock: logind lock failed")
@@ -147,8 +150,27 @@ func runSession() error {
 			}
 		case now := <-watchdog.C:
 			owner.CheckSleepDeadline(now)
+			resetSleepDeadlineTimer(watchdog, owner)
 		}
 	}
+}
+
+func resetSleepDeadlineTimer(timer *time.Timer, owner *session.Session) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	deadline, ok := owner.SleepDeadline()
+	if !ok {
+		return
+	}
+	delay := time.Until(deadline)
+	if delay < 0 {
+		delay = 0
+	}
+	timer.Reset(delay)
 }
 
 func requestLock() error {

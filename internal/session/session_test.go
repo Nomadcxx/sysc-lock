@@ -170,6 +170,33 @@ func TestSleepDeadlineDoesNotInventProtection(t *testing.T) {
 	}
 }
 
+func TestSleepDeadlineReportedAndCleared(t *testing.T) {
+	s := newSession(t)
+	if _, ok := s.SleepDeadline(); ok {
+		t.Fatal("reported a deadline before sleep preparation")
+	}
+	released := 0
+	s.Arm(func() (func(), error) { return func() { released++ }, nil })
+	now := time.Now()
+	if err := s.PrepareSleep(now, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	deadline, ok := s.SleepDeadline()
+	want := now.Add(900 * time.Millisecond)
+	if !ok || !deadline.Equal(want) {
+		t.Fatalf("SleepDeadline() = (%v, %t), want (%v, true)", deadline, ok, want)
+	}
+	if err := s.Report(s.Snapshot().Generation, lockd.Snapshot{Phase: lockd.Locked}); err != nil {
+		t.Fatal(err)
+	}
+	if released != 1 {
+		t.Fatalf("sealed session released inhibitor %d times, want 1", released)
+	}
+	if _, ok := s.SleepDeadline(); ok {
+		t.Fatal("reported a deadline after the inhibitor was released")
+	}
+}
+
 func TestResumeRetriesRefusedSleepAcquisition(t *testing.T) {
 	s := newSession(t)
 	take := func() (func(), error) { return func() {}, nil }
@@ -361,7 +388,7 @@ func TestUnlockAdmissionIsAtomicWithSleep(t *testing.T) {
 	})
 }
 
-func TestRepeatedSleepCoalescesLock(t *testing.T) {
+func TestRepeatedSleepCoalescesLockAndMovesDeadline(t *testing.T) {
 	s := newSession(t)
 	s.Arm(func() (func(), error) { return func() {}, nil })
 	now := time.Now()
@@ -372,8 +399,8 @@ func TestRepeatedSleepCoalescesLock(t *testing.T) {
 	if err := s.PrepareSleep(now.Add(500*time.Millisecond), time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if s.Snapshot().Generation != first.Generation || len(s.Requests) != 1 || s.deadline != now.Add(900*time.Millisecond) {
-		t.Fatal("duplicate sleep changed acquisition or extended deadline")
+	if s.Snapshot().Generation != first.Generation || len(s.Requests) != 1 || s.deadline != now.Add(1400*time.Millisecond) {
+		t.Fatal("duplicate sleep changed acquisition or failed to move deadline")
 	}
 }
 
