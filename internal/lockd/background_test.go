@@ -3,6 +3,7 @@ package lockd
 import (
 	"fmt"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
+	"github.com/Nomadcxx/sysc-wayland/client"
 	"image"
 	"image/color"
 	"image/png"
@@ -331,6 +332,221 @@ func TestFirePacesAtHalfSpeedAfterPolicy(t *testing.T) {
 				}
 				if !out.effectDue(out.lastFrame.Add(tc.want), c.effectInterval()) {
 					t.Fatal("missed half-speed deadline")
+				}
+			})
+		}
+	}
+}
+
+func TestScheduleBackgroundDoesNotCommitBeforeEffectDeadline(t *testing.T) {
+	now := time.Unix(100, 0)
+	out := &lockOut{
+		w:          2,
+		h:          2,
+		lastFrame:  now,
+		background: &backgroundWorker{jobs: make(chan backgroundJob, 1)},
+	}
+	c := &Client{
+		effect:  "rain",
+		outputs: map[OutputID]*lockOut{1: out},
+	}
+	c.SetEffectRate(20)
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("waiting for the next effect frame touched the Wayland surface: %v", recovered)
+		}
+	}()
+	c.scheduleBackground(out, now.Add(20*time.Millisecond))
+
+	if out.callback != nil {
+		t.Fatal("waiting for the next effect frame armed a callback without a paint")
+	}
+	if want := now.Add(50 * time.Millisecond); !out.effectDeadline.Equal(want) {
+		t.Fatalf("effect deadline = %v, want %v", out.effectDeadline, want)
+	}
+	if out.background.busy || len(out.background.jobs) != 0 {
+		t.Fatal("effect started before its frame interval elapsed")
+	}
+}
+
+func TestScheduleDueBackgroundStartsEffectAtDeadline(t *testing.T) {
+	now := time.Unix(100, 0)
+	deadline := now.Add(50 * time.Millisecond)
+	b := &backgroundWorker{jobs: make(chan backgroundJob, 1)}
+	out := &lockOut{w: 2, h: 2, lastFrame: now, effectDeadline: deadline, background: b}
+	c := &Client{effect: "rain", outputs: map[OutputID]*lockOut{1: out}}
+	c.SetEffectRate(20)
+
+	c.scheduleDueBackgrounds(deadline.Add(-time.Nanosecond))
+	if b.busy || len(b.jobs) != 0 {
+		t.Fatal("effect started before its deadline")
+	}
+	c.scheduleDueBackgrounds(deadline)
+	if !b.busy || len(b.jobs) != 1 {
+		t.Fatal("effect did not start at its deadline")
+	}
+	if !out.effectDeadline.IsZero() {
+		t.Fatal("started effect retained its deadline")
+	}
+	if job := <-b.jobs; job.width != 2 || job.height != 2 {
+		t.Fatalf("job size = %dx%d, want 2x2", job.width, job.height)
+	}
+}
+
+func TestEffectDeadlineWaitsForFrameCallback(t *testing.T) {
+	now := time.Unix(100, 0)
+	deadline := now.Add(50 * time.Millisecond)
+	b := &backgroundWorker{jobs: make(chan backgroundJob, 1)}
+	out := &lockOut{
+		w:              2,
+		h:              2,
+		callback:       &client.Callback{},
+		lastFrame:      now,
+		effectDeadline: deadline,
+		background:     b,
+	}
+	c := &Client{effect: "rain", outputs: map[OutputID]*lockOut{1: out}}
+	c.SetEffectRate(20)
+
+	c.scheduleDueBackgrounds(deadline)
+	if b.busy || len(b.jobs) != 0 {
+		t.Fatal("effect started while the frame callback was still pending")
+	}
+	if !out.effectDeadline.IsZero() {
+		t.Fatal("expired effect deadline remained scheduled")
+	}
+
+	out.callback = nil
+	c.scheduleBackground(out, deadline)
+	if !b.busy || len(b.jobs) != 1 {
+		t.Fatal("effect did not resume after the frame callback fired")
+	}
+}
+
+func TestFreezingMotionClearsEffectDeadlines(t *testing.T) {
+	now := time.Unix(100, 0)
+	out := &lockOut{effectDeadline: now.Add(50 * time.Millisecond)}
+	c := &Client{outputs: map[OutputID]*lockOut{1: out}}
+
+	c.SetMotionFrozen(true, now)
+	if !out.effectDeadline.IsZero() {
+		t.Fatal("frozen output retained an effect deadline")
+	}
+}
+
+func TestApplyPresentationClearsEffectDeadlines(t *testing.T) {
+	out := &lockOut{effectDeadline: time.Now().Add(time.Second)}
+	c := &Client{outputs: map[OutputID]*lockOut{1: out}}
+
+	c.ApplyPresentation("rain", "nord", false, "cpu", false)
+	if !out.effectDeadline.IsZero() {
+		t.Fatal("new presentation retained an old effect deadline")
+	}
+}
+
+func TestEffectCadenceUsesRequestedRate(t *testing.T) {
+	c := &Client{}
+	for _, fps := range []int{20, 30, 60, 120} {
+		c.SetEffectRate(fps)
+		if want, got := time.Second/time.Duration(fps), c.effectCadence(); got != want {
+			t.Errorf("rate %d cadence = %v, want %v", fps, got, want)
+		}
+	}
+	c.SetEffectRate(0)
+	if got := c.effectCadence(); got != defaultEffectEvery {
+		t.Fatalf("default cadence = %v, want %v", got, defaultEffectEvery)
+	}
+}
+
+func TestPresentationRefreshRequantizesEffectDeadline(t *testing.T) {
+	start := time.Unix(100, 0)
+	callbackAt := start.Add(6 * time.Millisecond)
+	out := &lockOut{
+		w:              2,
+		h:              2,
+		lastFrame:      start,
+		lastCallbackAt: callbackAt,
+		effectDeadline: start.Add(time.Second / 60),
+		background:     &backgroundWorker{jobs: make(chan backgroundJob, 1)},
+	}
+	c := &Client{effect: "rain", outputs: map[OutputID]*lockOut{1: out}}
+	c.SetEffectRate(60)
+
+	c.updatePresentationRefresh(out, 6*time.Millisecond, callbackAt)
+
+	want := callbackAt.Add(2 * 6 * time.Millisecond)
+	if !out.effectDeadline.Equal(want) {
+		t.Fatalf("effect deadline = %v, want presentation-aligned %v", out.effectDeadline, want)
+	}
+}
+
+func TestEffectCadenceAtRefreshRates(t *testing.T) {
+	// Match the callback-sampled effect counts from before removing empty commits.
+	want := map[int]map[int]int{
+		60:  {20: 20, 30: 30, 60: 60},
+		120: {20: 20, 30: 30, 60: 60},
+		165: {20: 21, 30: 33, 60: 55},
+	}
+	for _, hz := range []int{60, 120, 165} {
+		for _, fps := range []int{20, 30, 60} {
+			t.Run(fmt.Sprintf("%dHz/%dfps", hz, fps), func(t *testing.T) {
+				c := &Client{effect: "rain"}
+				c.SetEffectRate(fps)
+				framePeriod := time.Second / time.Duration(hz)
+				b := &backgroundWorker{jobs: make(chan backgroundJob, 1)}
+				// A wp_presentation v2 feedback event supplies this refresh estimate.
+				out := &lockOut{w: 2, h: 2, background: b, refreshInterval: framePeriod}
+				c.outputs = map[OutputID]*lockOut{1: out}
+				start := time.Unix(100, 0)
+				end := start.Add(time.Second)
+				nextFrame := start.Add(framePeriod)
+				starts := 0
+
+				// ponytail: finish jobs immediately to isolate timer cadence; live renderer timing is the hardware gate.
+				completeJob := func(now time.Time) {
+					if !b.busy {
+						return
+					}
+					<-b.jobs
+					starts++
+					b.busy = false
+					out.callback = &client.Callback{}
+					c.scheduleBackground(out, now)
+				}
+
+				c.scheduleBackground(out, start)
+				completeJob(start)
+				for {
+					next := end
+					if nextFrame.Before(next) {
+						next = nextFrame
+					}
+					if !out.effectDeadline.IsZero() && out.effectDeadline.Before(next) {
+						next = out.effectDeadline
+					}
+					if !next.Before(end) {
+						break
+					}
+
+					if !out.effectDeadline.IsZero() && !next.Before(out.effectDeadline) {
+						c.scheduleDueBackgrounds(next)
+						completeJob(next)
+					}
+					if next.Equal(nextFrame) {
+						nextFrame = nextFrame.Add(framePeriod)
+						if out.callback != nil {
+							out.callback = nil
+							out.lastCallbackAt = next
+							c.scheduleBackground(out, next)
+							completeJob(next)
+						}
+					}
+				}
+
+				expected := want[hz][fps]
+				if starts < expected-1 || starts > expected+1 {
+					t.Fatalf("effect jobs in 1s = %d, want previous cadence %d±1", starts, expected)
 				}
 			})
 		}

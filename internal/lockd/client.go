@@ -3,6 +3,7 @@ package lockd
 import (
 	"fmt"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/fractionalscale"
+	"github.com/Nomadcxx/sysc-lock/internal/lockd/presentationtime"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/screencopy"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/viewporter"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
@@ -95,13 +96,14 @@ type Client struct {
 	outputs            map[OutputID]*lockOut
 	removed            []*lockOut
 	viewporter         *viewporter.WpViewporter
+	presentation       *presentationtime.WpPresentation
 	scaleManager       *fractionalscale.WpFractionalScaleManagerV1
 	effect, palette    string
 	effectBackend      string // "auto" | "cpu" | "gpu"
 	effectPowerSave    bool
 	wallpaper          *wallpaperAsset
 	reduced, frozen    bool
-	effectEvery        time.Duration
+	effectPeriod       time.Duration
 	resumeAt           time.Time
 	OnDeadline         func(time.Time) time.Time
 	deadline           time.Time
@@ -130,6 +132,10 @@ type lockOut struct {
 	pending, removed   bool
 	callback           *client.Callback
 	lastFrame          time.Time
+	lastCallbackAt     time.Time
+	refreshInterval    time.Duration // wp_presentation's next-refresh estimate
+	presentationSerial uint64
+	effectDeadline     time.Time // next owner-loop wake after a visible frame callback
 	background         *backgroundWorker
 	backdrop           *render.Framebuffer
 	blurW, blurH       int
@@ -297,6 +303,13 @@ func (c *Client) global(g client.RegistryGlobalEvent) {
 			c.fatal = err
 		} else {
 			c.scaleManager = p
+		}
+	case presentationtime.WpPresentationInterfaceName:
+		if c.presentation == nil {
+			p := presentationtime.NewWpPresentation(ctx)
+			if bind(p, 2) == nil {
+				c.presentation = p
+			}
 		}
 	case "wl_output":
 		o := client.NewOutput(ctx)
@@ -540,7 +553,11 @@ func (c *Client) paint(out *lockOut) {
 		c.failUI(err)
 		return
 	}
-	if err = c.armFrame(out, false); err != nil {
+	if err = c.armFrame(out); err != nil {
+		c.failUI(err)
+		return
+	}
+	if err = c.requestPresentationFeedback(out); err != nil {
 		c.failUI(err)
 		return
 	}
@@ -562,7 +579,42 @@ func (c *Client) paint(out *lockOut) {
 	}
 	c.scheduleBackground(out, time.Now())
 }
-func (c *Client) armFrame(out *lockOut, commit bool) error {
+
+func (c *Client) requestPresentationFeedback(out *lockOut) error {
+	if c.presentation == nil {
+		return nil
+	}
+	feedback, err := c.presentation.Feedback(out.surface)
+	if err != nil {
+		if feedback != nil {
+			_ = feedback.Destroy()
+		}
+		return err
+	}
+	out.presentationSerial++
+	serial := out.presentationSerial
+	feedback.SetPresentedHandler(func(ev presentationtime.WpPresentationFeedbackPresentedEvent) {
+		if err := feedback.Destroy(); err != nil {
+			c.failUI(err)
+		}
+		if out.removed || serial != out.presentationSerial {
+			return
+		}
+		c.updatePresentationRefresh(out, time.Duration(ev.Refresh), time.Now())
+	})
+	feedback.SetDiscardedHandler(func(presentationtime.WpPresentationFeedbackDiscardedEvent) {
+		if err := feedback.Destroy(); err != nil {
+			c.failUI(err)
+		}
+		if out.removed || serial != out.presentationSerial {
+			return
+		}
+		out.effectDeadline = time.Time{}
+		out.refreshInterval = 0
+	})
+	return nil
+}
+func (c *Client) armFrame(out *lockOut) error {
 	if out.callback != nil {
 		return nil
 	}
@@ -581,11 +633,10 @@ func (c *Client) armFrame(out *lockOut, commit bool) error {
 		if out.removed {
 			return
 		}
-		c.scheduleBackground(out, time.Now())
+		now := time.Now()
+		out.lastCallbackAt = now
+		c.scheduleBackground(out, now)
 	})
-	if commit {
-		return out.surface.Commit()
-	}
 	return nil
 }
 
@@ -618,6 +669,10 @@ func (c *Client) freeBuffer(out *lockOut, sb *shmBuffer) {
 
 func (c *Client) destroyOut(out *lockOut) {
 	out.removed = true
+	out.effectDeadline = time.Time{}
+	out.lastCallbackAt = time.Time{}
+	out.refreshInterval = 0
+	out.presentationSerial++
 	if out.backdrop != nil {
 		clear(out.backdrop.Pix)
 		out.backdrop = nil
@@ -761,6 +816,19 @@ func (c *Client) drainWake() {
 	}
 }
 
+func (c *Client) nextBackgroundDeadline() time.Time {
+	var next time.Time
+	for _, out := range c.outputs {
+		if !out.effectDeadline.IsZero() && (next.IsZero() || out.effectDeadline.Before(next)) {
+			next = out.effectDeadline
+		}
+		if b := out.background; b != nil && !b.failed && !b.jobDeadline.IsZero() && (next.IsZero() || b.jobDeadline.Before(next)) {
+			next = b.jobDeadline
+		}
+	}
+	return next
+}
+
 // Run pumps wayland events and posted closures until the state machine
 // reaches a terminal phase (Done, Refused, Terminated) or the connection
 // breaks.
@@ -787,6 +855,7 @@ func (c *Client) Run() error {
 		}
 		now := time.Now()
 		c.expireBackground(now)
+		c.scheduleDueBackgrounds(now)
 		if ph == Requesting && !now.Before(c.requestDeadline) {
 			return fmt.Errorf("lock acquisition deadline expired")
 		}
@@ -807,10 +876,8 @@ func (c *Client) Run() error {
 		}
 		wait := -1
 		next := c.deadline
-		for _, out := range c.outputs {
-			if b := out.background; b != nil && !b.failed && !b.jobDeadline.IsZero() && (next.IsZero() || b.jobDeadline.Before(next)) {
-				next = b.jobDeadline
-			}
+		if background := c.nextBackgroundDeadline(); !background.IsZero() && (next.IsZero() || background.Before(next)) {
+			next = background
 		}
 		if ph == Requesting && (next.IsZero() || c.requestDeadline.Before(next)) {
 			next = c.requestDeadline

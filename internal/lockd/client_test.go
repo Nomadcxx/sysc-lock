@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSealedDoesNotWaitForUI(t *testing.T) {
@@ -84,6 +85,30 @@ func TestLateRemovedOutputCallback(t *testing.T) {
 	c.freeBuffer(old, &shmBuffer{})
 	if c.outputs[1] != replacement {
 		t.Fatal("late release touched replacement")
+	}
+}
+
+func TestDestroyOutputClearsEffectDeadline(t *testing.T) {
+	out := &lockOut{effectDeadline: time.Now().Add(time.Second)}
+	(&Client{}).destroyOut(out)
+	if !out.effectDeadline.IsZero() {
+		t.Fatal("removed output retained an effect deadline")
+	}
+}
+
+func TestNextBackgroundDeadlineIncludesEffectTimer(t *testing.T) {
+	start := time.Unix(100, 0)
+	effectDeadline := start.Add(time.Second)
+	jobDeadline := start.Add(2 * time.Second)
+	out := &lockOut{effectDeadline: effectDeadline, background: &backgroundWorker{jobDeadline: jobDeadline}}
+	c := &Client{outputs: map[OutputID]*lockOut{1: out}}
+
+	if got := c.nextBackgroundDeadline(); !got.Equal(effectDeadline) {
+		t.Fatalf("next background deadline = %v, want effect deadline %v", got, effectDeadline)
+	}
+	out.effectDeadline = time.Time{}
+	if got := c.nextBackgroundDeadline(); !got.Equal(jobDeadline) {
+		t.Fatalf("next background deadline = %v, want job deadline %v", got, jobDeadline)
 	}
 }
 

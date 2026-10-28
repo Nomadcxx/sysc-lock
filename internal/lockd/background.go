@@ -159,10 +159,39 @@ const (
 )
 
 func (out *lockOut) effectDue(now time.Time, every time.Duration) bool {
+	return out.lastFrame.IsZero() || now.Sub(out.lastFrame) >= out.effectInterval(every)
+}
+
+func (out *lockOut) effectInterval(every time.Duration) time.Duration {
 	if out.background != nil {
 		every = max(every, out.background.interval)
 	}
-	return out.lastFrame.IsZero() || now.Sub(out.lastFrame) >= every
+	return every
+}
+
+// nextEffectDeadline carries forward the callback-sampled cadence without rearming callbacks between paints.
+func (out *lockOut) nextEffectDeadline(every, cadence time.Duration) time.Time {
+	interval := out.effectInterval(cadence)
+	if out.refreshInterval <= 0 || out.lastCallbackAt.IsZero() {
+		return out.lastFrame.Add(interval)
+	}
+	deadline := out.lastFrame.Add(out.effectInterval(every))
+	remaining := deadline.Sub(out.lastCallbackAt)
+	if remaining <= 0 {
+		return deadline
+	}
+	frames := (remaining + out.refreshInterval - 1) / out.refreshInterval
+	return out.lastCallbackAt.Add(frames * out.refreshInterval)
+}
+
+func (c *Client) updatePresentationRefresh(out *lockOut, refresh time.Duration, now time.Time) {
+	if out.removed {
+		return
+	}
+	out.refreshInterval = refresh
+	if out.callback == nil && !out.effectDeadline.IsZero() {
+		c.scheduleBackground(out, now)
+	}
 }
 
 // SetEffectRate sets effect ticks per second, clamped to 10..120. The interval
@@ -170,16 +199,23 @@ func (out *lockOut) effectDue(now time.Time, every time.Duration) bool {
 // skipped, which would otherwise halve the rate.
 func (c *Client) SetEffectRate(fps int) {
 	if fps <= 0 {
-		c.effectEvery = 0
+		c.effectPeriod = 0
 		return
 	}
 	fps = max(minEffectFPS, min(maxEffectFPS, fps))
-	c.effectEvery = time.Second / time.Duration(fps) * 9 / 10
+	c.effectPeriod = time.Second / time.Duration(fps)
 }
 
 func (c *Client) effectInterval() time.Duration {
-	if c.effectEvery > 0 {
-		return c.effectEvery
+	if c.effectPeriod > 0 {
+		return c.effectPeriod * 9 / 10
+	}
+	return defaultEffectEvery
+}
+
+func (c *Client) effectCadence() time.Duration {
+	if c.effectPeriod > 0 {
+		return c.effectPeriod
 	}
 	return defaultEffectEvery
 }
@@ -194,6 +230,7 @@ func (c *Client) EnableBackground(effect, palette string, reduced bool, backend 
 func (c *Client) ApplyPresentation(effect, palette string, reduced bool, backend string, powerSave bool) {
 	c.EnableBackground(effect, palette, reduced, backend, powerSave)
 	for _, out := range c.outputs {
+		out.effectDeadline = time.Time{}
 		if b := out.background; b != nil {
 			b.stop()
 			c.releaseStoppedBackground(b)
@@ -215,6 +252,9 @@ func (c *Client) SetMotionFrozen(frozen bool, now time.Time) {
 	c.frozen = frozen
 	if frozen {
 		c.resumeAt = time.Time{}
+		for _, out := range c.outputs {
+			out.effectDeadline = time.Time{}
+		}
 	} else {
 		c.resumeAt = now.Add(2 * time.Second)
 	}
@@ -229,11 +269,10 @@ func (c *Client) scheduleBackground(out *lockOut, now time.Time) {
 		return
 	}
 	if !out.effectDue(now, c.effectInterval()) {
-		if err := c.armFrame(out, true); err != nil {
-			c.failUI(err)
-		}
+		out.effectDeadline = out.nextEffectDeadline(c.effectInterval(), c.effectCadence())
 		return
 	}
+	out.effectDeadline = time.Time{}
 	size, err := bufferBytes(out.w, out.h)
 	if err != nil {
 		c.failUI(err)
@@ -260,6 +299,17 @@ func (c *Client) scheduleBackground(out *lockOut, now time.Time) {
 	out.lastFrame = now
 	b.jobs <- backgroundJob{width: out.w, height: out.h, previous: b.spare}
 	b.spare = backgroundFrame{}
+}
+
+// scheduleDueBackgrounds advances effect work on the owner loop without an empty surface commit.
+func (c *Client) scheduleDueBackgrounds(now time.Time) {
+	for _, out := range c.outputs {
+		if out.effectDeadline.IsZero() || now.Before(out.effectDeadline) {
+			continue
+		}
+		out.effectDeadline = time.Time{}
+		c.scheduleBackground(out, now)
+	}
 }
 func (c *Client) collectBackground(out *lockOut) {
 	c.collectRemoved()
