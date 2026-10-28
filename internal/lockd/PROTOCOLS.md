@@ -1,4 +1,22 @@
-# Scale protocol bindings
+# Wayland protocol bindings
+
+## wp_presentation
+
+`presentationtime/presentation_time.go` is generated from the stable
+presentation-time protocol in wayland-protocols 1.49. Its XML SHA-256 is
+`dffac93bcb2bb1d8c385e72b8a8c2c0d4d79a336866322f3ba886dce2b27b1e2`.
+Regenerate from this directory with the pinned runtime module's scanner:
+
+```sh
+go run github.com/Nomadcxx/sysc-wayland/cmd/sysc-wayland-scanner@v0.3.3 -pkg presentationtime -o presentationtime/presentation_time.go -i ../../protocols/presentation-time.xml
+```
+
+The binding is optional at runtime. When advertised, its v2 `refresh` estimate
+quantizes effect deadlines, including the fastest-rate estimate used for
+variable-refresh outputs. A zero estimate falls back to the configured timer
+cadence.
+
+## Scale protocols
 
 These bindings copy sysc-terminal commit
 `4e522749ac8be37808e96bd0997824d04dd81f2a` without changing generated code.

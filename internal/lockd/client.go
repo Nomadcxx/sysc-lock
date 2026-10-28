@@ -3,6 +3,7 @@ package lockd
 import (
 	"fmt"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/fractionalscale"
+	"github.com/Nomadcxx/sysc-lock/internal/lockd/presentationtime"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/screencopy"
 	"github.com/Nomadcxx/sysc-lock/internal/lockd/viewporter"
 	"github.com/Nomadcxx/sysc-lock/internal/render"
@@ -95,6 +96,7 @@ type Client struct {
 	outputs            map[OutputID]*lockOut
 	removed            []*lockOut
 	viewporter         *viewporter.WpViewporter
+	presentation       *presentationtime.WpPresentation
 	scaleManager       *fractionalscale.WpFractionalScaleManagerV1
 	effect, palette    string
 	effectBackend      string // "auto" | "cpu" | "gpu"
@@ -130,6 +132,9 @@ type lockOut struct {
 	pending, removed   bool
 	callback           *client.Callback
 	lastFrame          time.Time
+	lastCallbackAt     time.Time
+	refreshInterval    time.Duration // wp_presentation's next-refresh estimate
+	presentationSerial uint64
 	effectDeadline     time.Time // next owner-loop wake after a visible frame callback
 	background         *backgroundWorker
 	backdrop           *render.Framebuffer
@@ -298,6 +303,13 @@ func (c *Client) global(g client.RegistryGlobalEvent) {
 			c.fatal = err
 		} else {
 			c.scaleManager = p
+		}
+	case presentationtime.WpPresentationInterfaceName:
+		if c.presentation == nil {
+			p := presentationtime.NewWpPresentation(ctx)
+			if bind(p, 2) == nil {
+				c.presentation = p
+			}
 		}
 	case "wl_output":
 		o := client.NewOutput(ctx)
@@ -545,6 +557,10 @@ func (c *Client) paint(out *lockOut) {
 		c.failUI(err)
 		return
 	}
+	if err = c.requestPresentationFeedback(out); err != nil {
+		c.failUI(err)
+		return
+	}
 	sb.busy = true
 	if err = out.surface.Commit(); err != nil {
 		sb.busy = false
@@ -562,6 +578,41 @@ func (c *Client) paint(out *lockOut) {
 		c.publish()
 	}
 	c.scheduleBackground(out, time.Now())
+}
+
+func (c *Client) requestPresentationFeedback(out *lockOut) error {
+	if c.presentation == nil {
+		return nil
+	}
+	feedback, err := c.presentation.Feedback(out.surface)
+	if err != nil {
+		if feedback != nil {
+			_ = feedback.Destroy()
+		}
+		return err
+	}
+	out.presentationSerial++
+	serial := out.presentationSerial
+	feedback.SetPresentedHandler(func(ev presentationtime.WpPresentationFeedbackPresentedEvent) {
+		if err := feedback.Destroy(); err != nil {
+			c.failUI(err)
+		}
+		if out.removed || serial != out.presentationSerial {
+			return
+		}
+		c.updatePresentationRefresh(out, time.Duration(ev.Refresh), time.Now())
+	})
+	feedback.SetDiscardedHandler(func(presentationtime.WpPresentationFeedbackDiscardedEvent) {
+		if err := feedback.Destroy(); err != nil {
+			c.failUI(err)
+		}
+		if out.removed || serial != out.presentationSerial {
+			return
+		}
+		out.effectDeadline = time.Time{}
+		out.refreshInterval = 0
+	})
+	return nil
 }
 func (c *Client) armFrame(out *lockOut) error {
 	if out.callback != nil {
@@ -582,7 +633,9 @@ func (c *Client) armFrame(out *lockOut) error {
 		if out.removed {
 			return
 		}
-		c.scheduleBackground(out, time.Now())
+		now := time.Now()
+		out.lastCallbackAt = now
+		c.scheduleBackground(out, now)
 	})
 	return nil
 }
@@ -617,6 +670,9 @@ func (c *Client) freeBuffer(out *lockOut, sb *shmBuffer) {
 func (c *Client) destroyOut(out *lockOut) {
 	out.removed = true
 	out.effectDeadline = time.Time{}
+	out.lastCallbackAt = time.Time{}
+	out.refreshInterval = 0
+	out.presentationSerial++
 	if out.backdrop != nil {
 		clear(out.backdrop.Pix)
 		out.backdrop = nil

@@ -459,18 +459,47 @@ func TestEffectCadenceUsesRequestedRate(t *testing.T) {
 	}
 }
 
+func TestPresentationRefreshRequantizesEffectDeadline(t *testing.T) {
+	start := time.Unix(100, 0)
+	callbackAt := start.Add(6 * time.Millisecond)
+	out := &lockOut{
+		w:              2,
+		h:              2,
+		lastFrame:      start,
+		lastCallbackAt: callbackAt,
+		effectDeadline: start.Add(time.Second / 60),
+		background:     &backgroundWorker{jobs: make(chan backgroundJob, 1)},
+	}
+	c := &Client{effect: "rain", outputs: map[OutputID]*lockOut{1: out}}
+	c.SetEffectRate(60)
+
+	c.updatePresentationRefresh(out, 6*time.Millisecond, callbackAt)
+
+	want := callbackAt.Add(2 * 6 * time.Millisecond)
+	if !out.effectDeadline.Equal(want) {
+		t.Fatalf("effect deadline = %v, want presentation-aligned %v", out.effectDeadline, want)
+	}
+}
+
 func TestEffectCadenceAtRefreshRates(t *testing.T) {
+	// Match the callback-sampled effect counts from before removing empty commits.
+	want := map[int]map[int]int{
+		60:  {20: 20, 30: 30, 60: 60},
+		120: {20: 20, 30: 30, 60: 60},
+		165: {20: 21, 30: 33, 60: 55},
+	}
 	for _, hz := range []int{60, 120, 165} {
 		for _, fps := range []int{20, 30, 60} {
 			t.Run(fmt.Sprintf("%dHz/%dfps", hz, fps), func(t *testing.T) {
 				c := &Client{effect: "rain"}
 				c.SetEffectRate(fps)
+				framePeriod := time.Second / time.Duration(hz)
 				b := &backgroundWorker{jobs: make(chan backgroundJob, 1)}
-				out := &lockOut{w: 2, h: 2, background: b}
+				// A wp_presentation v2 feedback event supplies this refresh estimate.
+				out := &lockOut{w: 2, h: 2, background: b, refreshInterval: framePeriod}
 				c.outputs = map[OutputID]*lockOut{1: out}
 				start := time.Unix(100, 0)
 				end := start.Add(time.Second)
-				framePeriod := time.Second / time.Duration(hz)
 				nextFrame := start.Add(framePeriod)
 				starts := 0
 
@@ -508,14 +537,16 @@ func TestEffectCadenceAtRefreshRates(t *testing.T) {
 						nextFrame = nextFrame.Add(framePeriod)
 						if out.callback != nil {
 							out.callback = nil
+							out.lastCallbackAt = next
 							c.scheduleBackground(out, next)
 							completeJob(next)
 						}
 					}
 				}
 
-				if starts < fps-1 || starts > fps+1 {
-					t.Fatalf("effect jobs in 1s = %d, want %d±1", starts, fps)
+				expected := want[hz][fps]
+				if starts < expected-1 || starts > expected+1 {
+					t.Fatalf("effect jobs in 1s = %d, want previous cadence %d±1", starts, expected)
 				}
 			})
 		}

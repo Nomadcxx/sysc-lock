@@ -169,6 +169,31 @@ func (out *lockOut) effectInterval(every time.Duration) time.Duration {
 	return every
 }
 
+// nextEffectDeadline carries forward the callback-sampled cadence without rearming callbacks between paints.
+func (out *lockOut) nextEffectDeadline(every, cadence time.Duration) time.Time {
+	interval := out.effectInterval(cadence)
+	if out.refreshInterval <= 0 || out.lastCallbackAt.IsZero() {
+		return out.lastFrame.Add(interval)
+	}
+	deadline := out.lastFrame.Add(out.effectInterval(every))
+	remaining := deadline.Sub(out.lastCallbackAt)
+	if remaining <= 0 {
+		return deadline
+	}
+	frames := (remaining + out.refreshInterval - 1) / out.refreshInterval
+	return out.lastCallbackAt.Add(frames * out.refreshInterval)
+}
+
+func (c *Client) updatePresentationRefresh(out *lockOut, refresh time.Duration, now time.Time) {
+	if out.removed {
+		return
+	}
+	out.refreshInterval = refresh
+	if out.callback == nil && !out.effectDeadline.IsZero() {
+		c.scheduleBackground(out, now)
+	}
+}
+
 // SetEffectRate sets effect ticks per second, clamped to 10..120. The interval
 // carries a 10% tolerance so a frame callback that lands a little early is not
 // skipped, which would otherwise halve the rate.
@@ -244,7 +269,7 @@ func (c *Client) scheduleBackground(out *lockOut, now time.Time) {
 		return
 	}
 	if !out.effectDue(now, c.effectInterval()) {
-		out.effectDeadline = out.lastFrame.Add(out.effectInterval(c.effectCadence()))
+		out.effectDeadline = out.nextEffectDeadline(c.effectInterval(), c.effectCadence())
 		return
 	}
 	out.effectDeadline = time.Time{}
