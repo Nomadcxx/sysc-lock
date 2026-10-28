@@ -3,14 +3,14 @@ module github.com/Nomadcxx/sysc-lock
 go 1.26.10
 
 require (
-	github.com/Nomadcxx/sysc-Go v1.0.11
-	github.com/Nomadcxx/sysc-terminal v0.3.1
+	github.com/Nomadcxx/sysc-Go v1.0.12
+	github.com/Nomadcxx/sysc-terminal v0.3.2
 	github.com/Nomadcxx/sysc-wayland v0.3.3
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/charmbracelet/x/ansi v0.10.1
-	github.com/charmbracelet/x/term v0.2.1
+	github.com/charmbracelet/x/ansi v0.11.6
+	github.com/charmbracelet/x/term v0.2.2
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/mattn/go-runewidth v0.0.31
 	github.com/msteinert/pam/v2 v2.1.0
@@ -20,13 +20,14 @@ require (
 )
 
 require (
+	charm.land/lipgloss/v2 v2.0.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
-	github.com/charmbracelet/colorprofile v0.3.2 // indirect
-	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta.3.0.20250917201909-41ff0bf215ea // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20250915111650-81d4262876ef // indirect
-	github.com/charmbracelet/x/cellbuf v0.0.13 // indirect
+	github.com/charmbracelet/colorprofile v0.4.2 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20251205161215-1948445e3318 // indirect
+	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
+	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
