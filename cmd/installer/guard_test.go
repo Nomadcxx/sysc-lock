@@ -17,8 +17,8 @@ func TestPinnedUIModules(t *testing.T) {
 		"bubbletea v1.3.10",
 		"bubbles v0.21.0",
 		"lipgloss v1.1.0",
-		"x/ansi v0.10.1",
-		"x/term v0.2.1",
+		"x/ansi v0.11.6",
+		"x/term v0.2.2",
 	} {
 		found := false
 		for _, line := range strings.Split(string(data), "\n") {
