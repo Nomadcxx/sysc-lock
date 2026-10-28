@@ -101,7 +101,7 @@ type Client struct {
 	effectPowerSave    bool
 	wallpaper          *wallpaperAsset
 	reduced, frozen    bool
-	effectEvery        time.Duration
+	effectPeriod       time.Duration
 	resumeAt           time.Time
 	OnDeadline         func(time.Time) time.Time
 	deadline           time.Time
@@ -130,6 +130,7 @@ type lockOut struct {
 	pending, removed   bool
 	callback           *client.Callback
 	lastFrame          time.Time
+	effectDeadline     time.Time // next owner-loop wake after a visible frame callback
 	background         *backgroundWorker
 	backdrop           *render.Framebuffer
 	blurW, blurH       int
@@ -540,7 +541,7 @@ func (c *Client) paint(out *lockOut) {
 		c.failUI(err)
 		return
 	}
-	if err = c.armFrame(out, false); err != nil {
+	if err = c.armFrame(out); err != nil {
 		c.failUI(err)
 		return
 	}
@@ -562,7 +563,7 @@ func (c *Client) paint(out *lockOut) {
 	}
 	c.scheduleBackground(out, time.Now())
 }
-func (c *Client) armFrame(out *lockOut, commit bool) error {
+func (c *Client) armFrame(out *lockOut) error {
 	if out.callback != nil {
 		return nil
 	}
@@ -583,9 +584,6 @@ func (c *Client) armFrame(out *lockOut, commit bool) error {
 		}
 		c.scheduleBackground(out, time.Now())
 	})
-	if commit {
-		return out.surface.Commit()
-	}
 	return nil
 }
 
@@ -618,6 +616,7 @@ func (c *Client) freeBuffer(out *lockOut, sb *shmBuffer) {
 
 func (c *Client) destroyOut(out *lockOut) {
 	out.removed = true
+	out.effectDeadline = time.Time{}
 	if out.backdrop != nil {
 		clear(out.backdrop.Pix)
 		out.backdrop = nil
@@ -761,6 +760,19 @@ func (c *Client) drainWake() {
 	}
 }
 
+func (c *Client) nextBackgroundDeadline() time.Time {
+	var next time.Time
+	for _, out := range c.outputs {
+		if !out.effectDeadline.IsZero() && (next.IsZero() || out.effectDeadline.Before(next)) {
+			next = out.effectDeadline
+		}
+		if b := out.background; b != nil && !b.failed && !b.jobDeadline.IsZero() && (next.IsZero() || b.jobDeadline.Before(next)) {
+			next = b.jobDeadline
+		}
+	}
+	return next
+}
+
 // Run pumps wayland events and posted closures until the state machine
 // reaches a terminal phase (Done, Refused, Terminated) or the connection
 // breaks.
@@ -787,6 +799,7 @@ func (c *Client) Run() error {
 		}
 		now := time.Now()
 		c.expireBackground(now)
+		c.scheduleDueBackgrounds(now)
 		if ph == Requesting && !now.Before(c.requestDeadline) {
 			return fmt.Errorf("lock acquisition deadline expired")
 		}
@@ -807,10 +820,8 @@ func (c *Client) Run() error {
 		}
 		wait := -1
 		next := c.deadline
-		for _, out := range c.outputs {
-			if b := out.background; b != nil && !b.failed && !b.jobDeadline.IsZero() && (next.IsZero() || b.jobDeadline.Before(next)) {
-				next = b.jobDeadline
-			}
+		if background := c.nextBackgroundDeadline(); !background.IsZero() && (next.IsZero() || background.Before(next)) {
+			next = background
 		}
 		if ph == Requesting && (next.IsZero() || c.requestDeadline.Before(next)) {
 			next = c.requestDeadline
