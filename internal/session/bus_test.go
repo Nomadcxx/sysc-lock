@@ -97,6 +97,10 @@ func TestSupportedCompositor(t *testing.T) {
 		"/usr/local/bin/sysc-compositor",
 		"niri",
 		"sysc-compositor",
+		"/home/u/.cache/sysc-compositor-gate-20261103/sysc-compositor.touch",
+		"/home/u/.cache/sysc-compositor-gate-20261108/bin/sysc-compositor.1af5288",
+		"/usr/bin/niri (deleted)",
+		"/usr/local/bin/sysc-compositor (deleted)",
 	} {
 		if !supportedCompositor(executable) {
 			t.Errorf("rejected supported compositor %q", executable)
@@ -107,6 +111,9 @@ func TestSupportedCompositor(t *testing.T) {
 		"/usr/local/bin/sysc-compositor-helper",
 		"/usr/bin/gnome-shell",
 		"/usr/local/bin/sysc-compositor-old",
+		"/usr/local/bin/sysc-compositor.",
+		"/usr/local/bin/niri.old",
+		"/usr/bin/gnome-shell (deleted)",
 	} {
 		if supportedCompositor(executable) {
 			t.Errorf("accepted foreign executable %q", executable)

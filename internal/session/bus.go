@@ -184,12 +184,18 @@ func sameCompositorPeer(ipc, display *unix.Ucred) error {
 // sysc-compositor keeps Niri's Wayland globals and IPC socket, so the startup
 // and peer checks above prove it belongs to this session just as they do for
 // Niri. A different program owned by the same UID still fails here.
+//
+// A sysc-compositor gate or test build keeps the name with a ".<tag>" suffix,
+// and the kernel reports a binary an upgrade replaced while it ran with
+// " (deleted)" after its path.
 func supportedCompositor(executable string) bool {
-	switch filepath.Base(executable) {
+	name := strings.TrimSuffix(filepath.Base(executable), " (deleted)")
+	switch name {
 	case "niri", "sysc-compositor":
 		return true
 	}
-	return false
+	tag, gate := strings.CutPrefix(name, "sysc-compositor.")
+	return gate && tag != ""
 }
 
 const maxStartupEnvironment = 1 << 20
