@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeManager stands in for the user's systemd. Every test gets one through
@@ -43,7 +44,15 @@ func (f *fakeManager) log() string {
 	return strings.Join(f.calls, "\n")
 }
 
+// liveSleepEnv makes the test binary only sleep: TestUninstallRefusesWhileRunning
+// runs a copy of it as the live sysc-lock.
+const liveSleepEnv = "SYSC_LOCK_TEST_LIVE_SLEEP"
+
 func TestMain(m *testing.M) {
+	if os.Getenv(liveSleepEnv) == "1" {
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
 	userCtl = func(ctx context.Context, args ...string) *exec.Cmd { return manager.cmd(ctx, args...) }
 	manager = &fakeManager{fail: map[string]bool{"daemon-reload": true}}
 	os.Exit(m.Run())

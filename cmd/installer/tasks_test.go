@@ -339,11 +339,14 @@ func TestUninstallEmptyPrefixSkipsRemovals(t *testing.T) {
 func TestUninstallRefusesWhileRunning(t *testing.T) {
 	opts := uninstallOpts(t)
 	seedInstall(t, opts.prefix)
-	sleepBin, err := exec.LookPath("sleep")
+	// A copy of this test binary stays running under any name; a copied
+	// sleep does not where coreutils is one multi-call binary (uutils on
+	// Ubuntu 26.04) that picks its tool by name.
+	self, err := os.Executable()
 	if err != nil {
-		t.Skip("no sleep binary")
+		t.Fatal(err)
 	}
-	data, err := os.ReadFile(sleepBin)
+	data, err := os.ReadFile(self)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +354,8 @@ func TestUninstallRefusesWhileRunning(t *testing.T) {
 	if err := os.WriteFile(live, data, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(live, "60")
+	cmd := exec.Command(live)
+	cmd.Env = append(os.Environ(), liveSleepEnv+"=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
