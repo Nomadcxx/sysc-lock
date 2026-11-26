@@ -63,6 +63,21 @@ func main() {
 	}
 }
 
+// settlePowerOutcome leaves the session usable again after a power action
+// returns. A successful suspend or hibernate resumes into the still-locked
+// session, so the in-flight status must not keep swallowing input.
+func settlePowerOutcome(menu *power.Menu, view *lockd.View, outcome power.Outcome) {
+	menu.Recover()
+	view.Powering = ""
+	switch outcome {
+	case power.OK:
+	case power.Refused:
+		view.SetError("Not permitted", time.Now())
+	default:
+		view.SetError("Failed", time.Now())
+	}
+}
+
 // runLocker owns a single acquisition. The persistent session owns supervision.
 func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Phase, error) {
 	if os.Getenv("WAYLAND_DISPLAY") == "" {
@@ -265,17 +280,7 @@ func runLocker(report func(lockd.Snapshot), beforeUnlock func() error) (lockd.Ph
 			go func() {
 				outcome := executor.Run(a)
 				client.Post(func() {
-					switch outcome {
-					case power.OK:
-					case power.Refused:
-						menu.Recover()
-						view.Powering = ""
-						view.SetError("Not permitted", time.Now())
-					default:
-						menu.Recover()
-						view.Powering = ""
-						view.SetError("Failed", time.Now())
-					}
+					settlePowerOutcome(menu, view, outcome)
 					client.Repaint()
 				})
 			}()

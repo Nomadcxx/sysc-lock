@@ -744,3 +744,26 @@ func TestLocaleFallsBackWhenFontCannotDrawCJK(t *testing.T) {
 		}
 	}
 }
+
+func TestSuccessfulPowerActionClearsInFlightState(t *testing.T) {
+	menu := power.New(power.DefaultOrder, power.Availability{Suspend: true}, "c2")
+	view := lockd.View{Powering: power.Suspend.Status()}
+	settlePowerOutcome(menu, &view, power.OK)
+	if view.Powering != "" {
+		t.Fatalf("powering status survived success: %q", view.Powering)
+	}
+	if menu.Open() {
+		t.Fatal("power menu remained open after success")
+	}
+}
+
+func TestFailedPowerActionStillClearsInFlightState(t *testing.T) {
+	for _, outcome := range []power.Outcome{power.Refused, power.Failed} {
+		menu := power.New(power.DefaultOrder, power.Availability{Suspend: true}, "c2")
+		view := lockd.View{Powering: power.Suspend.Status()}
+		settlePowerOutcome(menu, &view, outcome)
+		if view.Powering != "" {
+			t.Fatalf("outcome %v left powering status %q", outcome, view.Powering)
+		}
+	}
+}
