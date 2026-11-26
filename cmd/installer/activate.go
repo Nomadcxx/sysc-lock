@@ -138,14 +138,25 @@ func useWithShell(r *runner) error {
 		return err
 	}
 	path := filepath.Join(dir, "sysc-shell", "config.json")
-	fi, err := os.Stat(path)
+	linkInfo, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return skipError{"no sysc-shell config"}
 	}
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path)
+	writePath := path
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		writePath, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			return fmt.Errorf("resolve sysc-shell config symlink: %w", err)
+		}
+	}
+	fi, err := os.Stat(writePath)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(writePath)
 	if err != nil {
 		return err
 	}
@@ -180,7 +191,7 @@ func useWithShell(r *runner) error {
 	if err := enc.Encode(cfg); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*")
+	tmp, err := os.CreateTemp(filepath.Dir(writePath), ".config-*")
 	if err != nil {
 		return err
 	}
@@ -189,7 +200,7 @@ func useWithShell(r *runner) error {
 		os.Remove(tmp.Name())
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return os.Rename(tmp.Name(), writePath)
 }
 
 func wallsEnabled(configDir string) bool {
