@@ -361,12 +361,16 @@ func TestUninstallRefusesWhileRunning(t *testing.T) {
 	}
 	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
 
+	f := useManager(t)
 	r := newRunner(opts, testLogger(t))
 	err = r.runAll(context.Background(), nil)
 	want := fmt.Sprintf("sysc-lock is running (pid %d) from %s: "+
 		"stop sysc-lock-session.service in a coordinated Niri session first", cmd.Process.Pid, live)
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v", err)
+	}
+	if got := f.log(); got != "" {
+		t.Fatalf("uninstall stopped the service before refusing: %q", got)
 	}
 	if _, err := os.Stat(opts.prefix + "/share/systemd/user/sysc-lock-session.service"); err != nil {
 		t.Error("unit removed despite the refusal")

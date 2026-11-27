@@ -104,14 +104,17 @@ func activateService(ctx context.Context, r *runner) error {
 	return nil
 }
 
-// stopService stops and disables the session owner before its files go. If
-// the user manager cannot do it, the caller's refusal checks still stand.
-func stopService(ctx context.Context, r *runner) {
+// stopService stops and disables the session owner before its files go.
+func stopService(ctx context.Context, r *runner) error {
 	links, _ := enabledUnitLinks()
 	if len(links) == 0 && len(runningLockOwners(r.opts.prefix+"/bin/sysc-lock")) == 0 {
-		return
+		return nil
 	}
-	_, _ = r.userCtl(ctx, "Check service", "disable", "--now", unitName)
+	out, err := r.userCtl(ctx, "Check service", "disable", "--now", unitName)
+	if err != nil {
+		return fmt.Errorf("disable %s: %s", unitName, firstNonEmpty(lastLine(out, 20), err.Error()))
+	}
+	return nil
 }
 
 func firstNonEmpty(a, b string) string {

@@ -380,11 +380,13 @@ func uninstallTasks() []task {
 			}},
 		{name: "Check service", description: "Stopping and disabling sysc-lock-session.service",
 			fn: func(ctx context.Context, r *runner, _ func(int, taskStatus)) error {
-				stopService(ctx, r)
 				if owners := runningLockOwners(r.opts.prefix + "/bin/sysc-lock"); len(owners) > 0 {
 					return fmt.Errorf("sysc-lock is running (pid %d) from %s: "+
 						"stop sysc-lock-session.service in a coordinated Niri session first",
 						owners[0].pid, owners[0].exe)
+				}
+				if err := stopService(ctx, r); err != nil {
+					return err
 				}
 				links, err := enabledUnitLinks()
 				if err != nil {
