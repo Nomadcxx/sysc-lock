@@ -217,6 +217,44 @@ func TestUseWithShellKeepsExistingChoices(t *testing.T) {
 	}
 }
 
+// A dotfiles symlink must survive installation: edit the checkout target, not
+// replace the link with a regular file.
+func TestUseWithShellPreservesSymlinkedConfig(t *testing.T) {
+	opts := activationHome(t)
+	useManager(t)
+	dotfiles := t.TempDir()
+	target := filepath.Join(dotfiles, "config.json")
+	if err := os.WriteFile(target, []byte(`{"session":{"locker":""}}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "sysc-shell", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Skipf("create symlink: %v", err)
+	}
+	installWithCandidate(t, opts)
+
+	fi, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("installer replaced the shell config symlink")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"locker": "sysc-lock"`) {
+		t.Fatalf("dotfiles target not updated: %s", data)
+	}
+	if fi, err := os.Stat(target); err != nil || fi.Mode().Perm() != 0o640 {
+		t.Fatalf("target mode changed: %v, %v", fi.Mode().Perm(), err)
+	}
+}
+
 // The shell's When idle is lock or screensaver: an enabled sysc-walls keeps it.
 func TestUseWithShellLeavesIdleToTheScreensaver(t *testing.T) {
 	opts := activationHome(t)
