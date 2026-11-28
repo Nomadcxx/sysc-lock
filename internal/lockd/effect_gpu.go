@@ -278,7 +278,7 @@ func (b *gpuBackend) init() error {
 	if b.stepProg, err = buildProgram(effectVS, stepFS); err != nil {
 		return err
 	}
-	if b.drawProg, err = buildProgram(effectVS, drawFS); err != nil {
+	if b.drawProg, err = buildProgram(drawVS, drawFS); err != nil {
 		C.glDeleteProgram(b.stepProg)
 		b.stepProg = 0
 		return err
@@ -436,25 +436,23 @@ func (b *gpuBackend) Draw(pixels []byte, stride int) error {
 	C.glUniform2f(b.drawU.uGrid, C.GLfloat(b.w), C.GLfloat(b.h))
 	C.glUniform3fv(b.drawU.uPalette, paletteStopsN, (*C.GLfloat)(unsafe.Pointer(&b.pal[0])))
 	C.glDrawArrays(C.GL_TRIANGLES, 0, 3)
-	C.glFinish()
+	// No glFinish here: glReadPixels into client memory waits for the draw to
+	// complete, so a second drain of the pipeline would only add a stall.
 	if err := glErr("draw"); err != nil {
 		return err
 	}
 	return b.readback(pixels, stride)
 }
 
-// readback copies the FBO into the caller's BGRA memory. GL returns rows
-// bottom-up; every frame the CPU renderer produces is top-down, so rows are
-// flipped here rather than in each effect's maths.
+// readback copies the FBO into the caller's BGRA memory. The draw pass already
+// leaves top row first, in blue, green, red, alpha order, dimmed (see sealed in
+// shaders.go), so a tight buffer is read straight into and only a padded or
+// short one goes through a row copy.
 func (b *gpuBackend) readback(pixels []byte, stride int) error {
 	rowBytes := b.w * 4
 	if stride == rowBytes && len(pixels) >= rowBytes*b.h {
-		if len(b.scratch) != rowBytes {
-			b.scratch = make([]byte, rowBytes)
-		}
 		C.glReadPixels(0, 0, C.GLsizei(b.w), C.GLsizei(b.h),
 			C.GL_RGBA, C.GL_UNSIGNED_BYTE, unsafe.Pointer(&pixels[0]))
-		flipRGBAToBGRA(pixels[:rowBytes*b.h], b.scratch)
 		return glErr("readback")
 	}
 	// Padded or partial caller buffers retain the full-frame fallback.
@@ -472,30 +470,9 @@ func (b *gpuBackend) readback(pixels []byte, stride int) error {
 		if dst+rowBytes > len(pixels) {
 			break // caller buffer is smaller than the geometry; keep what fits
 		}
-		s := b.scratch[(b.h-1-y)*rowBytes:]
-		p := pixels[dst : dst+rowBytes]
-		for i := 0; i+3 < rowBytes; i += 4 {
-			p[i+0] = s[i+2] / 3 // B
-			p[i+1] = s[i+1] / 3 // G
-			p[i+2] = s[i+0] / 3 // R
-			p[i+3] = 0xff
-		}
+		copy(pixels[dst:dst+rowBytes], b.scratch[y*rowBytes:(y+1)*rowBytes])
 	}
 	return glErr("readback")
-}
-
-// flipRGBAToBGRA converts tightly packed GL rows in place with one spare row.
-func flipRGBAToBGRA(pixels, row []byte) {
-	stride := len(row)
-	for top, bottom := 0, len(pixels)-stride; top < bottom; top, bottom = top+stride, bottom-stride {
-		copy(row, pixels[top:top+stride])
-		copy(pixels[top:top+stride], pixels[bottom:bottom+stride])
-		copy(pixels[bottom:bottom+stride], row)
-	}
-	for i := 0; i < len(pixels); i += 4 {
-		r, g, b := pixels[i], pixels[i+1], pixels[i+2]
-		pixels[i], pixels[i+1], pixels[i+2], pixels[i+3] = b/3, g/3, r/3, 0xff
-	}
 }
 
 func (b *gpuBackend) Close() error {
@@ -529,7 +506,14 @@ func (b *gpuBackend) paintSolid(rgba [4]float32, dst []byte, stride int) error {
 	}
 	C.glBindFramebuffer(C.GL_FRAMEBUFFER, b.fbo)
 	C.glViewport(0, 0, C.GLsizei(b.w), C.GLsizei(b.h))
-	C.glClearColor(C.GLfloat(rgba[0]), C.GLfloat(rgba[1]), C.GLfloat(rgba[2]), C.GLfloat(rgba[3]))
+	// The FBO holds the final bytes: blue, green, red dimmed to a third, opaque.
+	// A clear colour is stored with the same rounding as the draw pass, so it
+	// is set to the dimmed level of each channel in that order.
+	dim := func(c float32) C.GLfloat {
+		level := int(min(max(c, 0), 1)*255 + 0.5)
+		return C.GLfloat(float32(level/3) / 255)
+	}
+	C.glClearColor(dim(rgba[2]), dim(rgba[1]), dim(rgba[0]), 1)
 	C.glClear(C.GL_COLOR_BUFFER_BIT)
 	C.glFinish()
 	return b.readback(dst, stride)

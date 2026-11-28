@@ -46,6 +46,17 @@ vec3 paletteAt(int k) {
 	}
 	return c;
 }
+
+// sealed is the draw pass's output contract. The frame is read straight into
+// the caller's memory, which holds blue, green, red, alpha bytes dimmed to a
+// third of their level, so the colour leaves the shader in that order: the
+// channels clamp to one, round to an 8-bit level, divide by three the way
+// integer division does, and alpha is one. The half level keeps the floor
+// away from an exact multiple of three on any rounding.
+vec4 sealed(vec3 c) {
+	vec3 level = floor(clamp(c, 0.0, 1.0) * 255.0 + 0.5);
+	return vec4(floor((level.bgr + 0.5) / 3.0) / 255.0, 1.0);
+}
 `
 
 // nullStepFS is the step program for stateless effects: the frame is a pure
@@ -68,5 +79,20 @@ varying vec2 vUv;
 void main() {
 	vUv = aPos * 0.5 + 0.5;
 	gl_Position = vec4(aPos, 0.0, 1.0);
+}
+`
+
+// drawVS is effectVS for the draw pass, mirrored top to bottom. glReadPixels
+// returns the bottom row first and a frame wants its top row first, so
+// mirroring the placement lets the read land in the caller's order. vUv is
+// taken before the mirror: a draw shader still sees vUv.y = 1 at the top of
+// the frame. The state passes keep effectVS, so the state textures are not
+// mirrored from one tick to the next.
+const drawVS = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main() {
+	vUv = aPos * 0.5 + 0.5;
+	gl_Position = vec4(aPos.x, -aPos.y, 0.0, 1.0);
 }
 `

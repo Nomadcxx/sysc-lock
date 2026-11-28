@@ -173,21 +173,130 @@ func TestGpuTightReadbackUsesRowStorage(t *testing.T) {
 	}
 }
 
-func TestFlipRGBAToBGRAOddHeight(t *testing.T) {
-	pixels := []byte{1, 2, 3, 0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23}
-	flipRGBAToBGRA(pixels, make([]byte, 8))
-	want := []byte{6, 5, 5, 255, 7, 7, 6, 255, 3, 3, 2, 255, 4, 4, 4, 255, 1, 0, 0, 255, 2, 1, 1, 255}
-	if !bytes.Equal(pixels, want) {
-		t.Fatalf("converted rows = %v, want %v", pixels, want)
+// The draw pass lands rows top-down in BGRA order, so a tight caller buffer is
+// read straight into and no CPU row storage is needed to repair the frame.
+func TestGpuTightDrawNeedsNoScratch(t *testing.T) {
+	b := newTestGpuBackend(t, "fire", 8, 8)
+	for i := 0; i < 5; i++ {
+		b.Step()
+	}
+	pixels := make([]byte, 8*8*4)
+	if err := b.Draw(pixels, 8*4); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.scratch) != 0 {
+		t.Fatalf("tight draw readback retains %d bytes of CPU row storage, want none", len(b.scratch))
 	}
 }
 
-func TestFlipRGBAToBGRADimsRGBAndSealsAlpha(t *testing.T) {
-	pixels := []byte{200, 100, 50, 0, 10, 20, 30, 99}
-	flipRGBAToBGRA(pixels, make([]byte, 8))
-	want := []byte{16, 33, 66, 255, 10, 6, 3, 255}
-	if !bytes.Equal(pixels, want) {
-		t.Fatalf("dimmed converted row = %v, want %v", pixels, want)
+// installDrawShader swaps the draw pass for a test fragment shader, so the
+// vertex stage, the colour helper and the readback can be checked without an
+// effect's own maths in the way.
+func installDrawShader(t *testing.T, b *gpuBackend, fs string) {
+	t.Helper()
+	glMu.Lock()
+	defer glMu.Unlock()
+	if err := b.makeCurrent(); err != nil {
+		t.Fatal(err)
+	}
+	prog, err := buildProgram(drawVS, fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.drawProg = prog
+	b.drawU = resolveUniforms(prog)
+}
+
+// A frame is read back top row first and in blue, green, red, alpha byte order
+// straight from the draw pass. The shader paints a quadrant per channel
+// pattern: red grows to the right, green grows toward the top.
+func TestGpuDrawPassOrientationAndByteOrder(t *testing.T) {
+	const w, h = 4, 4
+	for _, stride := range []int{w * 4, w*4 + 8} {
+		b := newTestGpuBackend(t, "fire", w, h)
+		installDrawShader(t, b, effectFSHead+`
+void main() {
+	gl_FragColor = sealed(vec3(step(0.5, vUv.x), step(0.5, vUv.y), 0.0));
+}
+`)
+		b.Step()
+		const sentinel = 0x77
+		pixels := bytes.Repeat([]byte{sentinel}, stride*h)
+		if err := b.Draw(pixels, stride); err != nil {
+			t.Fatal(err)
+		}
+		if n := b.glErrors(); n != 0 {
+			t.Fatalf("%d GL errors after the frame", n)
+		}
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				var want []byte
+				switch {
+				case y < h/2 && x < w/2: // top left: green only
+					want = []byte{0, 85, 0, 255}
+				case y < h/2: // top right: green and red
+					want = []byte{0, 85, 85, 255}
+				case x < w/2: // bottom left: black
+					want = []byte{0, 0, 0, 255}
+				default: // bottom right: red only
+					want = []byte{0, 0, 85, 255}
+				}
+				if got := pixels[y*stride+x*4 : y*stride+x*4+4]; !bytes.Equal(got, want) {
+					t.Fatalf("stride %d pixel (%d,%d) = %v, want %v", stride, x, y, got, want)
+				}
+			}
+			for x := w * 4; x < stride; x++ {
+				if pixels[y*stride+x] != sentinel {
+					t.Fatalf("stride %d row %d padding byte %d was overwritten", stride, y, x)
+				}
+			}
+		}
+	}
+}
+
+// The helper dims every channel to a third of its 8-bit level with integer
+// division, exactly as the frame conversion on the CPU did, for all 256 levels.
+func TestGpuSealedColourDimsEveryLevelLikeIntegerDivision(t *testing.T) {
+	const w = 256
+	b := newTestGpuBackend(t, "fire", w, 1)
+	installDrawShader(t, b, effectFSHead+`
+void main() {
+	float i = floor(gl_FragCoord.x);
+	gl_FragColor = sealed(vec3(i / 255.0, (255.0 - i) / 255.0, mod(i * 7.0, 256.0) / 255.0));
+}
+`)
+	b.Step()
+	pixels := make([]byte, w*4)
+	if err := b.Draw(pixels, w*4); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < w; i++ {
+		r, g, bl := byte(i), byte(255-i), byte(i*7%256)
+		want := []byte{bl / 3, g / 3, r / 3, 255}
+		if got := pixels[i*4 : i*4+4]; !bytes.Equal(got, want) {
+			t.Fatalf("level %d: got BGRA %v, want %v", i, got, want)
+		}
+	}
+}
+
+// Values past one are clamped before the dim, as the effect shaders clamp.
+func TestGpuSealedColourClampsAndSealsAlpha(t *testing.T) {
+	b := newTestGpuBackend(t, "fire", 2, 2)
+	installDrawShader(t, b, effectFSHead+`
+void main() {
+	gl_FragColor = sealed(vec3(4.0, -1.0, 0.5));
+}
+`)
+	b.Step()
+	pixels := make([]byte, 2*2*4)
+	if err := b.Draw(pixels, 2*4); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < len(pixels); i += 4 {
+		// 0.5 is 128 as a byte, a third of which is 42.
+		if got := pixels[i : i+4]; !bytes.Equal(got, []byte{42, 0, 85, 255}) {
+			t.Fatalf("pixel %d = %v, want {42,0,85,255}", i/4, got)
+		}
 	}
 }
 
