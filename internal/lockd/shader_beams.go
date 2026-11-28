@@ -22,6 +22,6 @@ void main() {
 		// Vertical gradient: bright at the top, fading down the column.
 		col += paletteAt(int(rhash(vec2(k + 17.0, s)) * 7.99)) * beam * vUv.y;
 	}
-	gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
+	gl_FragColor = sealed(col);
 }
 `

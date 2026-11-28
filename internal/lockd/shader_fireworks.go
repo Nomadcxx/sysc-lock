@@ -23,6 +23,6 @@ void main() {
 		float core = smoothstep(0.02, 0.0, d) * step(age, 4.0);
 		col += paletteAt(int(rhash(vec2(k + 71.0, s)) * 7.99)) * (ring + core) * fade;
 	}
-	gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
+	gl_FragColor = sealed(col);
 }
 `

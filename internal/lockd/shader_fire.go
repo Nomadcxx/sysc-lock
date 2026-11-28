@@ -3,8 +3,8 @@ package lockd
 // Fire is a single-pass upward value-noise flame, thresholded into palette
 // ramp rows. It keeps no state: the frame is a pure function of uTime, so
 // the step pass is the null program. In this space vUv.y = 1 is the screen
-// top (readback flips rows), so the base is at low y and the field rises as
-// uTime grows.
+// top (the draw pass is placed mirrored so the read lands top row first), so
+// the base is at low y and the field rises as uTime grows.
 
 const fireFS = effectFSHead + `
 float vnoise(vec2 p) {
@@ -25,6 +25,6 @@ void main() {
 
 	float heat = clamp(n + (1.0 - vUv.y) * 0.55 - 0.3, 0.0, 1.0);
 	vec3 col = step(0.001, heat) * paletteAt(int(heat * 7.99)) * (0.4 + heat);
-	gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
+	gl_FragColor = sealed(col);
 }
 `
